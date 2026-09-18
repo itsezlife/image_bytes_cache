@@ -353,7 +353,13 @@ abstract interface class IImageBytesIndex {
 /// Bytes only. Retention and timestamps live on [IImageBytesIndex].
 abstract interface class IImageBytesBlobStore {
   /// Returns payload bytes for [key], or `null` if missing.
-  Future<Uint8List?> read(ImageCacheKey key);
+  ///
+  /// [knownByteLength] is an optional hint from the RAM index row already
+  /// probed by [IndexedImageBytesCache]. Web size-routed stores use it to skip
+  /// a guaranteed Cache API miss when the body lives in OPFS; other backends
+  /// ignore it. Callers that do not know the length omit the argument and get
+  /// the store's default probe order.
+  Future<Uint8List?> read(ImageCacheKey key, {int? knownByteLength});
 
   /// Writes or replaces payload bytes for [key].
   Future<void> write(ImageCacheKey key, Uint8List bytes);
@@ -495,7 +501,7 @@ final class IndexedImageBytesCache implements IImageBytesCache {
         return const _ReadProbe.needsDelete();
       }
 
-      final bytes = await _blobs.read(key);
+      final bytes = await _blobs.read(key, knownByteLength: record.byteLength);
       if (bytes == null) return const _ReadProbe.needsIndexDelete();
       // Legacy / corrupt empty rows still count toward capacity; scrub as miss.
       if (bytes.isEmpty) return const _ReadProbe.needsDelete();
@@ -520,7 +526,7 @@ final class IndexedImageBytesCache implements IImageBytesCache {
           null => false,
         };
         if (!expired) {
-          return _finishSharedHit(key, now, preEpoch);
+          return _finishSharedHit(key, now, preEpoch, record.byteLength);
         }
         await _deleteBoth(key);
         await _commitOrRollback(preEpoch);
@@ -532,7 +538,7 @@ final class IndexedImageBytesCache implements IImageBytesCache {
         // Re-check: a write may have restored the blob after the shared probe.
         final record = await _index.get(key);
         if (record == null) return null;
-        final bytes = await _blobs.read(key);
+        final bytes = await _blobs.read(key, knownByteLength: record.byteLength);
         if (bytes != null) {
           _pendingAccess[key] = _clock();
           return bytes;
@@ -550,8 +556,9 @@ final class IndexedImageBytesCache implements IImageBytesCache {
     ImageCacheKey key,
     DateTime now,
     Map<ImageCacheKey, ImageBytesRecord> preEpoch,
+    int knownByteLength,
   ) async {
-    final bytes = await _blobs.read(key);
+    final bytes = await _blobs.read(key, knownByteLength: knownByteLength);
     if (bytes == null || bytes.isEmpty) {
       _pendingAccess.remove(key);
       await _deleteBoth(key);

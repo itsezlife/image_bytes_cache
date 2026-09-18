@@ -67,7 +67,7 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
    `group('Unit', …)`) or the default suite run skips it.
 8. **Pure Dart core:** no Flutter SDK / `flutter_test`, no `package:shared`,
    no `lints_tool`. No `package:flutter` or `package:shared` imports in
-   `lib/`. Widgets, ImageProviders, and SVG paint belong in
+   `lib/`. Paint widgets and Flutter adapters belong in
    [`image_bytes_cache_flutter`](../image_bytes_cache_flutter/), not here.
    Store / ladder microbenches stay in this package; head-to-head compare and
    scroll-profile harnesses go under
@@ -84,7 +84,8 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
   snapshot (no optimistic durable hit) and rethrows.
 - **64 KiB cut:** VM transferable isolate writes and web OPFS vs Cache API use
   the same threshold. Do not collapse to all-OPFS or all-Cache without updating
-  docs and tests.
+  docs and tests. Web hot reads with known index `byteLength` ≥ cut go OPFS-first
+  (skip Cache miss tax); twin-clear-before-write stays.
 - **Empty cached payload = miss** in the resolver; empty durable writes are
   not retained (evict); sticky empty rows scrub on read; write-through failure
   never fails a successful network resolve (diagnostics only; throwing

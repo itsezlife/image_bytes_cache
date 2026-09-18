@@ -168,8 +168,9 @@ No per-write `compute`.
 `ImageBytesBlobStore$Routed$JS.opfsByteThreshold` is 64 KiB, matching the VM
 transferable cut so small and large bodies share one documented size policy.
 Writes route by length and delete the key from the other backend so a
-resize across the threshold cannot leave a stale twin. Reads check Cache then
-OPFS.
+resize across the threshold cannot leave a stale twin. Reads use the RAM index
+`byteLength` when the brain already probed it: at or above the threshold they
+go straight to OPFS (no Cache match tax); otherwise they check Cache then OPFS.
 
 Synthetic keys use host `image-bytes.invalid` so payload entries never share
 identity with real network fetches and never invite accidental Cache `add()`

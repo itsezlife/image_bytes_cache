@@ -29,7 +29,7 @@ final class ImageBytesBlobStore$Cache$JS implements IImageBytesBlobStore {
   }
 
   @override
-  Future<Uint8List?> read(ImageCacheKey key) async {
+  Future<Uint8List?> read(ImageCacheKey key, {int? knownByteLength}) async {
     final cache = _ensureOpen();
     final match = await cache.match(ImageBytesWebKeys.blobUrl(key).toJS).toDart;
     return switch (match) {

@@ -40,7 +40,7 @@ final class ImageBytesBlobStore$File$VM implements IImageBytesBlobStore {
   ///
   /// Below the threshold, transferable prep is usually more expensive than a
   /// normal isolate copy of a small body. Above it, avoiding a second full copy
-  /// on send matters for large rasters and other heavy payloads.
+  /// on send matters for large payloads.
   static const int transferByteThreshold = 64 * 1024;
 
   /// Cache root shared with [ImageBytesIndex$File$VM].
@@ -74,7 +74,7 @@ final class ImageBytesBlobStore$File$VM implements IImageBytesBlobStore {
   String _pathFor(ImageCacheKey key) => p.join(directory, key.value);
 
   @override
-  Future<Uint8List?> read(ImageCacheKey key) => readPath(_pathFor(key));
+  Future<Uint8List?> read(ImageCacheKey key, {int? knownByteLength}) => readPath(_pathFor(key));
 
   @override
   Future<void> write(ImageCacheKey key, Uint8List bytes) => writePathAtomic(_pathFor(key), bytes);

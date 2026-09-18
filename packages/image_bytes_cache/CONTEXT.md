@@ -1,10 +1,9 @@
 # image_bytes_cache
 
-Durable remote image **bytes** (SVG and raster payloads). Pure-Dart engine in
-this repository. Not Flutter's decoded [ImageCache], not a generic KV store,
-and not Hive.
+Durable remote image **bytes**. Pure-Dart engine in this repository. Not
+Flutter's decoded [ImageCache], not a generic KV store, and not Hive.
 
-Paint widgets (SVG today; raster later) live in sibling
+Paint widgets live in sibling
 [image_bytes_cache_flutter](../image_bytes_cache_flutter/CONTEXT.md). Hosts
 bootstrap this package with `ImageBytesCache.open` / `configure`, then paint
 through the flutter adapters.
@@ -47,20 +46,23 @@ IsolateController; large blob writes use TransferableTypedData above a
 documented threshold. Worker death fails in-flight blob RPCs (no hang) and
 drops the dead controller so later ops can respawn. Web: Cache API index document; blobs under 64 KiB use
 Cache API with synthetic `.invalid` keys; blobs at or above 64 KiB use OPFS
-files (same cut as the VM transferable threshold). Index document bytes go
+files (same cut as the VM transferable threshold). Hot-path reads pass index
+`byteLength` so large bodies skip a guaranteed Cache API miss and go to OPFS.
+Index document bytes go
 through [ImageBytesIndexDocumentCodec] (`Map` ↔ UTF-8 JSON bytes via fused
 converters); adapters do not call `jsonEncode` / `utf8.encode` directly.
 _Avoid_: sidecar `.meta.json` per blob; SharedPreferences for image blobs;
 peeling UTF-8/JSON around the document codec at call sites; per-key full index
 rewrite during soft-LRU flush; per-write `compute` on VM; all-OPFS or
 all-Cache-API when the size split is the documented policy; IsolateController
-on web; importing `package:shared` for the isolate helper
+on web; importing `package:shared` for the isolate helper; Cache-then-OPFS on
+every large hit when meta already knows the body is above the cut
 
 **ImageBytesRetention**:
 Sealed eviction policy. TTL checked on read; capacity trimmed on write/prune.
 No background timer. Default `standard` caps age, entry count, and total bytes.
 Non-positive `maxEntries` / `maxBytes` are asserted invalid.
-_Avoid_: background eviction timers; entry-count-only budgets for large rasters;
+_Avoid_: background eviction timers; entry-count-only budgets for large payloads;
 zero or negative capacity caps
 
 **ImageBytesResolver** / **ImageBytesRequest**:

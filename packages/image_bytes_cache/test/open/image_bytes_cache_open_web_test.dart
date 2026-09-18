@@ -104,6 +104,35 @@ void main() {
       expect(await second.read(key), bytes);
     });
 
+    test('large-body hot read prefers OPFS when index byteLength implies it', () async {
+      // Without a size hint, Cache-then-OPFS would return this poison twin.
+      // Index meta already knows the body is ≥ threshold, so the hot path must
+      // skip Cache and return the OPFS payload.
+      const key = ImageCacheKey('large_with_poison_cache');
+      final large = _filled(ImageBytesBlobStore$Routed$JS.opfsByteThreshold, 11);
+      final poison = Uint8List.fromList([1, 2, 3]);
+
+      final cache = await ImageBytesCache.open(
+        retention: const ImageBytesRetention.unlimited(),
+      );
+      addTearDown(cache.close);
+
+      await cache.write(key, large);
+      expect(await _opfsHas(key), isTrue);
+      expect(await _cacheHas(key), isFalse);
+
+      final blobs = await web.window.caches.open(ImageBytesWebKeys.blobsCacheName).toDart;
+      await blobs
+          .put(
+            ImageBytesWebKeys.blobUrl(key).toJS,
+            web.Response(poison.toJS),
+          )
+          .toDart;
+      expect(await _cacheHas(key), isTrue);
+
+      expect(await cache.read(key), large);
+    });
+
     test('rewrite across threshold moves the body between backends', () async {
       const key = ImageCacheKey('resize');
       final small = Uint8List.fromList([9, 8, 7]);

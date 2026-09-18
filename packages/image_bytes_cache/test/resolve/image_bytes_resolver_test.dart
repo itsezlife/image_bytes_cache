@@ -473,7 +473,7 @@ final class _MapBlobStore implements IImageBytesBlobStore {
   final Map<String, Uint8List> store = {};
 
   @override
-  Future<Uint8List?> read(ImageCacheKey key) async => store[key.value];
+  Future<Uint8List?> read(ImageCacheKey key, {int? knownByteLength}) async => store[key.value];
 
   @override
   Future<void> write(ImageCacheKey key, Uint8List bytes) async {

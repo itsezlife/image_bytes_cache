@@ -33,6 +33,17 @@ void main() {
       expect(index.records[key.value]?.byteLength, 4);
     });
 
+    test('hot-path blob read forwards index byteLength as knownByteLength', () async {
+      const key = ImageCacheKey('sized');
+      final bytes = Uint8List.fromList([9, 8, 7, 6]);
+
+      await cache.write(key, bytes);
+      blobs.lastKnownByteLength = null;
+
+      expect(await cache.read(key), bytes);
+      expect(blobs.lastKnownByteLength, bytes.length);
+    });
+
     test('empty write is not retained as capacity waste', () async {
       cache = IndexedImageBytesCache(
         index: index,
@@ -429,6 +440,9 @@ final class _FakeBlobs implements IImageBytesBlobStore {
   Duration opDelay = Duration.zero;
   Future<void> Function()? readHook;
 
+  /// Last [knownByteLength] passed to [read], or `null` if never read / omitted.
+  int? lastKnownByteLength;
+
   Future<void> _delay() async {
     if (opDelay > Duration.zero) {
       await Future<void>.delayed(opDelay);
@@ -436,7 +450,8 @@ final class _FakeBlobs implements IImageBytesBlobStore {
   }
 
   @override
-  Future<Uint8List?> read(ImageCacheKey key) async {
+  Future<Uint8List?> read(ImageCacheKey key, {int? knownByteLength}) async {
+    lastKnownByteLength = knownByteLength;
     await readHook?.call();
     await _delay();
     return store[key.value];

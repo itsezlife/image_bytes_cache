@@ -1,5 +1,9 @@
 ## 0.0.2
 
+- **FIXED**: Web large-body hot reads skip a guaranteed Cache API miss when
+  index `byteLength` is already at or above the OPFS threshold (64 KiB). The
+  brain forwards that length into the blob store; twin-clear-before-write and
+  the size cut are unchanged.
 - **FIXED**: Failed durable index commit rolls the RAM meta mirror back to the
   pre-epoch snapshot and rethrows. In-process reads cannot treat an optimistic
   put as a durable hit. Blob orphans from the failed epoch heal via reclaim or

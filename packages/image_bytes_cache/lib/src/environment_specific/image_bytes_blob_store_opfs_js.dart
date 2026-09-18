@@ -34,7 +34,7 @@ final class ImageBytesBlobStore$Opfs$JS implements IImageBytesBlobStore {
   }
 
   @override
-  Future<Uint8List?> read(ImageCacheKey key) async {
+  Future<Uint8List?> read(ImageCacheKey key, {int? knownByteLength}) async {
     final directory = _ensureOpen();
     try {
       final handle = await directory.getFileHandle(key.value).toDart;
