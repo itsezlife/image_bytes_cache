@@ -1,10 +1,10 @@
 # Architecture
 
-`image_bytes_cache` is a durable store for **remote image bytes** (SVG, PNG, and
-other payloads). It is the pure-Dart core package in this repository. Sibling
-`image_bytes_cache_flutter` paints above it. This package owns identity,
-retention, platform persistence, and the resolve ladder. It does not own
-decode, Flutter `ImageCache`, or UI widgets.
+`image_bytes_cache` is a durable store for **remote image bytes**. It is the
+pure-Dart core package in this repository. Sibling `image_bytes_cache_flutter`
+paints above it. This package owns identity, retention, platform persistence,
+and the resolve ladder. It does not own decode, Flutter `ImageCache`, or UI
+widgets.
 
 ```
 image_bytes_cache_flutter widget
@@ -22,9 +22,10 @@ Glossary terms live in [`CONTEXT.md`](../CONTEXT.md). Storage mechanics:
 
 ## Layers
 
-1. **Identity** (`ImageCacheKey`). Filename-safe key from URL + canonical
-   headers. Shared with HTTP coalesce so casing and map order cannot split one
-   logical fetch into two cache entries.
+1. **Identity** (`ImageCacheKey`). Filename-safe key from the
+   `Uri.base.resolve` canonical URL + canonical headers. Shared with HTTP
+   coalesce (`ImageCacheKey.value`) so casing, map order, and delimiter
+   collisions cannot split or merge logical fetches.
 2. **Cache contract** (`IImageBytesCache`). What paint code and the resolver
    call: `read` / `write` / `evict` / `prune` / `close`. Implementations:
    `IndexedImageBytesCache` (composition brain), `MemoryImageBytesCache`,
@@ -57,16 +58,24 @@ await ImageBytesCache.configure(
 
 On web, `directory` is ignored. Hard storage failure returns
 `MemoryImageBytesCache` and reports `open_degraded` unless
-`throwOnOpenFailure: true`. Missing VM `directory` still throws (`ArgumentError`).
+`throwOnOpenFailure: true`; platform open closes any partial VM worker or web
+handles before that surface. Missing VM `directory` still throws
+(`ArgumentError`).
 
 **Paint path:**
 
 `ImageBytesRequest` → `ImageBytesResolver.resolve` →
 
-1. `cache.read(key)`. Hit returns bytes; empty payload counts as miss.
-2. On miss, `HttpBytesFetcher.getBytes` (pool + in-flight coalesce).
+1. `cache.read(key)`. Hit returns bytes; empty payload counts as miss (and
+   durable stores scrub sticky empty rows / refuse empty writes).
+2. On miss, `HttpBytesFetcher.getBytes` (pool + in-flight coalesce; timeout
+   after slot via `AbortableRequest`).
 3. Return network bytes immediately; `cache.write` runs unawaited. Write
-   failure reports diagnostics and does not fail the resolve future.
+   failure reports diagnostics and does not fail the resolve future (throwing
+   host `onEvent` is swallowed).
+
+`ImageBytesResolver.shared()` re-reads `ImageBytesCache.shared()` /
+`HttpBytesFetcher.shared()` on each resolve (not a one-shot snapshot).
 
 **Durable hit (after open):**
 
@@ -94,7 +103,7 @@ or tests): environment-specific stores, `ImageBytesIndexDocumentCodec`,
 | Layer | Owns |
 | --- | --- |
 | `image_bytes_cache` (this package) | Durable bytes engine, ladder, open/configure, diagnostics; store / ladder microbenches |
-| `image_bytes_cache_flutter` (sibling) | Flutter widgets / ImageProviders that decode and paint from `IImageBytesResolver` bytes; PageStorage keys aligned with `ImageCacheKey`; UI/profile benches and `benchmark_compare/` under that package |
+| `image_bytes_cache_flutter` (sibling) | Flutter widgets that decode and paint from `IImageBytesResolver` bytes; PageStorage keys aligned with `ImageCacheKey`; UI/profile benches and `benchmark_compare/` under that package |
 
 New storage code lands here. New paint widgets land in the flutter package, not
 in a host UI util tree and not in this core.

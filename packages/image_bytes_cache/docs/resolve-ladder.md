@@ -5,38 +5,61 @@ from paint code.
 
 ## Identity: `ImageCacheKey`
 
-Filename-safe string: host + safe basename + short fingerprint of URL and
-headers.
+Filename-safe string: host + safe basename + short fingerprint of the
+**canonical URL** and headers.
 
-`ImageCacheKey.fromUrl` lowercases header keys, last-wins on case duplicates,
-then sorts keys before hashing (`canonicalHeaders`). That matches
-`HttpBytesFetcher` coalesce, so header casing and map iteration order cannot
-split one logical download into two cache identities or two in-flight GETs.
+`ImageCacheKey.fromUrl` resolves the input with `Uri.base.resolve` before
+host/basename extraction and hashing, so a relative path and its absolute form
+against the same base share one key — the same URI form
+`ImageBytesResolver` uses for GET. Header keys are lowercased, last-wins on
+case duplicates, then sorted before hashing (`canonicalHeaders`). Fingerprint
+bytes are length-prefixed URL + canonical headers (not a `url|headers` string
+join), so a `|` inside the URL or a header value cannot forge another
+`(url, headers)` pair.
+
+`HttpBytesFetcher` coalesce uses `ImageCacheKey.fromUrl(…).value` as the
+in-flight map key, so coalesce identity and durable identity stay the same
+rules: header casing / map order cannot split one logical download, and
+delimiter collisions cannot merge two.
 
 Distinct URLs that share a basename still produce distinct keys via the
 fingerprint. Values are capped (~180 chars) so they stay safe as filesystem
 names and web store keys.
 
 Do not use basename-only disk keys. Do not treat header key casing as identity.
+Do not join URL and headers with an ambiguous delimiter for coalesce or
+fingerprinting.
 
 ## Request and resolve
 
 `ImageBytesRequest` carries `url`, optional `headers`, and optional
 `cacheKey`. When `cacheKey` is null, the resolver builds one with
-`ImageCacheKey.fromUrl`.
+`ImageCacheKey.fromUrl` (canonical URL + headers). When `cacheKey` is set, that
+value is the **full** durable identity: headers still go on the network GET but
+are not folded into the key. Hosts that vary `Authorization` across logical
+resources must omit `cacheKey` or mint distinct overrides — the ladder will not
+silently share one override across different Authorization values.
 
 `ImageBytesResolver` order:
 
 1. `cache.read(key)`. Non-empty hit returns immediately.
 2. Empty cached payload counts as a **miss** (bad empty write must not poison
-   the ladder).
-3. `HttpBytesFetcher.getBytes` on miss.
+   the ladder). Durable stores also refuse to retain empty writes (evict the
+   key instead) and scrub sticky empty rows on read so they cannot waste
+   `maxEntries` capacity.
+3. `HttpBytesFetcher.getBytes` on `Uri.base.resolve(url)` on miss.
 4. Return network bytes; schedule `cache.write` with `unawaited`. Write failure
    reports through `ImageBytesDiagnostics` and does **not** fail `resolve`.
+   A throwing host `onEvent` callback is swallowed inside `report` so the
+   unawaited catch path cannot become a second unhandled async error.
 
 Inject cache and fetcher in tests. Production paint usually uses
-`ImageBytesResolver.shared()`, which reads `ImageBytesCache.shared()` and
-`HttpBytesFetcher.shared()` (or `debugShared` overrides).
+`ImageBytesResolver.shared()`, which **re-reads** `ImageBytesCache.shared()`
+and `HttpBytesFetcher.shared()` (or `debugShared` overrides) on every
+`resolve`. It does not snapshot them at first call, so configure after an
+early paint still enables durable caching, and configure replacement /
+`resetShared` cannot leave the ladder bound to NoOp or a closed previous
+store.
 
 ## HTTP: `HttpBytesFetcher`
 
@@ -45,12 +68,21 @@ GET bodies only. Callers own disk cache and decode.
 | Knob | Default | Notes |
 | --- | --- | --- |
 | `maxConcurrent` | 6 | Further callers wait in `Pool` |
-| `timeout` | 15s | Starts after a pool slot is acquired; wait for a slot is not timed |
+| `timeout` | 15s | Starts after a pool slot is acquired; wait for a slot is **intentionally unbounded** |
 
-Concurrent calls with the same URI and canonical headers share one in-flight
-`Future`. Non-2xx → `ClientException`. Empty body → `StateError`. After
-`close`, new `getBytes` calls throw; in-flight work may still finish or fail.
-If the fetcher created its own `http.Client`, `close` closes that client.
+Concurrent calls that share the same `ImageCacheKey` identity (canonical URL +
+canonical headers) share one in-flight `Future`. Non-2xx → `ClientException`.
+Empty body → `StateError` (fail closed; no silent empty paint). After `close`,
+new `getBytes` calls throw; in-flight work may still finish or fail. If the
+fetcher created its own `http.Client`, `close` closes that client.
+
+Timeout uses `http.AbortableRequest`: clients that honor `abortTrigger`
+(`IOClient`, browser client) release the underlying connection when the
+deadline elapses. The waiter always sees `TimeoutException`. Clients that do
+not abort (for example `MockClient` in tests) still fail the waiter; any
+leftover in-flight work is then a property of that client. Pool wait before a
+slot is not timed — raise `maxConcurrent` or reduce host concurrency if queue
+latency dominates.
 
 ## Diagnostics
 
@@ -63,7 +95,7 @@ controls whether soft failures are audible. Default is `silent`. Process-wide
 | --- | --- |
 | `silent` | No emission |
 | `developer` | `developer.log` name `image_bytes` |
-| `onEvent` | Host callback (logger, Crashlytics, …) |
+| `onEvent` | Host callback (logger, Crashlytics, …). Must not throw; throws are swallowed inside `report` so soft-failure paths cannot escalate to unhandled async errors |
 
 Ops on `ImageBytesLogEvent`:
 
@@ -86,16 +118,18 @@ The package does not depend on a product logger. Hosts bridge
 | VM `directory` | Required; prefer app cache root, not documents |
 | Web `directory` | Ignored |
 | `diagnostics` | Installed on `current` before open so wipe can report |
-| Hard open failure | Degrades to `MemoryImageBytesCache` + `open_degraded` unless `throwOnOpenFailure` |
-| Missing VM directory | Still throws `ArgumentError` (host wiring bug) |
+| Hard open failure | Degrades to `MemoryImageBytesCache` + `open_degraded` unless `throwOnOpenFailure`; platform open closes any partial VM worker / web handles before that surface |
+| Missing VM directory | Still throws `ArgumentError` (host wiring bug); no degrade and no worker spawn |
 
 `configure(cache)` closes any previous non-identical shared instance **before**
 assign so workers and Cache handles do not leak across reconfigure.
 `shared()` returns `NoOpImageBytesCache` until configure (or `debugShared`).
-`resetShared` (tests) closes, clears configure and debug overrides, and resets
-diagnostics to silent.
+`resetShared` (tests) closes, clears configure and debug overrides, resets
+diagnostics to silent, and clears `ImageBytesResolver` shared wiring.
 
 Bootstrap order: open (with diagnostics) → configure → paint via
 `ImageBytesResolver.shared()` (typically from `image_bytes_cache_flutter`
-widgets or an injected resolver). Resolver and fetcher shared factories stay
-thin; do not invent a fourth process-wide global for the same ladder.
+widgets or an injected resolver). Calling shared resolve **before** configure
+is safe: later configure is visible on the next resolve. Resolver and fetcher
+shared factories stay thin; do not invent a fourth process-wide global for the
+same ladder.

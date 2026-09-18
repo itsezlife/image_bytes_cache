@@ -5,6 +5,7 @@ import 'cache/indexed_image_bytes_cache_test.dart' as indexed_image_bytes_cache_
 import 'open/image_bytes_cache_open_test.dart' as image_bytes_cache_open_test;
 import 'resolve/http_bytes_fetcher_test.dart' as http_bytes_fetcher_test;
 import 'resolve/image_bytes_resolver_test.dart' as image_bytes_resolver_test;
+import 'storage/image_bytes_blob_store_vm_test.dart' as image_bytes_blob_store_vm_test;
 import 'storage/image_bytes_web_store_test.dart' as image_bytes_web_store_test;
 
 /// Single aggregate entrypoint for VM unit + integration suites.
@@ -17,5 +18,6 @@ void main() => group('Unit', () {
   image_bytes_cache_open_test.main();
   image_bytes_resolver_test.main();
   http_bytes_fetcher_test.main();
+  image_bytes_blob_store_vm_test.main();
   image_bytes_web_store_test.main();
 });

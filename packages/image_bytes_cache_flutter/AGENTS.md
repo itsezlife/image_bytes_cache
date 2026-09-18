@@ -7,8 +7,8 @@ High-signal orientation for LLMs/agents working in
 
 ## Owns
 
-- Flutter widgets that paint resolved image **bytes** (SVG today;
-  ImageProviders / raster later).
+- Flutter widgets that paint resolved image **bytes** (including
+  `CachedNetworkSvgImage`).
 - Widget tests for those adapters.
 - UI/profile benches and flutter-side `benchmark_compare` (head-to-head bytes
   tables when fair, profile feed, scroll-pressure matrix) under
@@ -34,12 +34,15 @@ files, sockets, or durable stores from widgets.
 
 1. **Depend on core contracts only** (`IImageBytesResolver`, `ImageCacheKey`,
    request types). Do not reimplement ladder, coalesce, or blob IO here.
-2. **Soft paint failures stay widget-local** (`onError` / `errorBuilder` /
-   placeholder). No product logger inside paint adapters.
+2. **Soft paint failures stay widget-local** (`onError` / `errorBuilder` for
+   resolve **and** SVG decode/paint — never endless placeholder alone). No
+   product logger inside paint adapters.
 3. **PageStorage identity** aligns with `ImageCacheKey` when a short-lived
-   copy is kept for scroll restore.
+   copy is kept for scroll restore; keep it bounded / opt-out
+   (`pageStorageMaxBytes` / `persistInPageStorage`), never a second durable
+   store.
 4. **No dual implementations** in host design-system packages — migrate or
-   re-export; do not keep a second SVG resolve/paint tree beside this package.
+   re-export; do not keep a second resolve/paint tree beside this package.
 5. **Profile / compare harnesses** that need a Flutter binding live in this
    package’s [`benchmark_compare/`](benchmark_compare/), not in core
    `benchmark/`.
@@ -78,6 +81,6 @@ does not replace core store or bytes-table ratios.
 ## The docs
 
 - [`CONTEXT.md`](CONTEXT.md): paint-adapter glossary.
-- [`CHANGELOG.md`](CHANGELOG.md): split and SVG migration history.
+- [`CHANGELOG.md`](CHANGELOG.md): package history.
 - Core engine: [`../image_bytes_cache/AGENTS.md`](../image_bytes_cache/AGENTS.md),
   [`../image_bytes_cache/CONTEXT.md`](../image_bytes_cache/CONTEXT.md).

@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:image_bytes_cache/src/environment_specific/image_bytes_blob_store_web_js.dart';
+import 'package:image_bytes_cache/src/environment_specific/image_bytes_blob_store_routed_js.dart';
 import 'package:image_bytes_cache/src/environment_specific/image_bytes_index_cache_js.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 
@@ -12,27 +12,44 @@ import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 /// wired into [IndexedImageBytesCache] so it shares the exclusive mutate
 /// domain. Hard storage failures throw so [ImageBytesCache.open] can degrade
 /// to memory with a diagnostic.
+///
+/// On any failure after Cache/OPFS handles exist, this function closes those
+/// partial resources before rethrowing so degrade / `throwOnOpenFailure` paths
+/// cannot leak quota-holding handles.
 Future<IImageBytesCache> $openImageBytesCache({
   String? directory,
   ImageBytesRetention retention = ImageBytesRetention.standard,
   DateTime Function()? clock,
 }) async {
-  final blobs = await ImageBytesBlobStore$Web$JS.open();
-  final index = await ImageBytesIndex$Cache$JS.open(onWipe: blobs.wipeAll);
+  ImageBytesBlobStore$Routed$JS? blobs;
+  ImageBytesIndex$Cache$JS? index;
+  ImageBytesCache$JS? opened;
+  try {
+    blobs = await ImageBytesBlobStore$Routed$JS.open();
+    index = await ImageBytesIndex$Cache$JS.open(onWipe: blobs.wipeAll);
 
-  final cache = ImageBytesCache$JS(
-    inner: IndexedImageBytesCache(
+    opened = ImageBytesCache$JS(
+      inner: IndexedImageBytesCache(
+        index: index,
+        blobs: blobs,
+        retention: retention,
+        clock: clock,
+        reclaimOrphans: blobs.reclaimOrphans,
+      ),
       index: index,
       blobs: blobs,
-      retention: retention,
-      clock: clock,
-      reclaimOrphans: blobs.reclaimOrphans,
-    ),
-    index: index,
-    blobs: blobs,
-  );
-  await cache.reclaimOrphans();
-  return cache;
+    );
+    // Ownership transferred to [opened]; close goes through the wrapper.
+    blobs = null;
+    index = null;
+    await opened.reclaimOrphans();
+    return opened;
+  } on Object {
+    await opened?.close();
+    await index?.close();
+    await blobs?.close();
+    rethrow;
+  }
 }
 
 /// Closes Cache / OPFS handles around [IndexedImageBytesCache].
@@ -43,14 +60,14 @@ final class ImageBytesCache$JS implements IImageBytesCache {
   ImageBytesCache$JS({
     required IndexedImageBytesCache inner,
     required ImageBytesIndex$Cache$JS index,
-    required ImageBytesBlobStore$Web$JS blobs,
+    required ImageBytesBlobStore$Routed$JS blobs,
   }) : _inner = inner,
        _index = index,
        _blobs = blobs;
 
   final IndexedImageBytesCache _inner;
   final ImageBytesIndex$Cache$JS _index;
-  final ImageBytesBlobStore$Web$JS _blobs;
+  final ImageBytesBlobStore$Routed$JS _blobs;
 
   Future<void> reclaimOrphans() => _inner.reclaimOrphans();
 

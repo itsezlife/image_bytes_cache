@@ -2,7 +2,7 @@ name: image_bytes_cache_flutter
 description: >-
   Flutter paint adapters for image_bytes_cache - widgets that resolve bytes
   via the core ladder.
-version: 0.0.1
+version: 0.0.2
 publish_to: none
 
 homepage: https://github.com/itsezlife/image_bytes_cache

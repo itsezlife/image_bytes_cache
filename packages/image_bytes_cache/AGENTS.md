@@ -67,7 +67,7 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
    `group('Unit', …)`) or the default suite run skips it.
 8. **Pure Dart core:** no Flutter SDK / `flutter_test`, no `package:shared`,
    no `lints_tool`. No `package:flutter` or `package:shared` imports in
-   `lib/`. Widgets, ImageProviders, and SVG paint belong in
+   `lib/`. Paint widgets and Flutter adapters belong in
    [`image_bytes_cache_flutter`](../image_bytes_cache_flutter/), not here.
    Store / ladder microbenches stay in this package; head-to-head compare and
    scroll-profile harnesses go under
@@ -79,30 +79,42 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
 - **Hot path:** concurrent shared reads on the RAM index mirror + blob read;
   soft LRU in `_pendingAccess` only; no durable meta IO on paint hits.
 - **Mutate epoch:** write / evict / prune / TTL-delete / reclaim / close share
-  one exclusive domain; flush soft access → mutate RAM + blobs → one `commit`
-  → reclaim when applicable.
+  one exclusive domain; snapshot RAM → flush soft access → mutate RAM + blobs →
+  one `commit` → reclaim when applicable. Thrown commit restores the RAM
+  snapshot (no optimistic durable hit) and rethrows.
 - **64 KiB cut:** VM transferable isolate writes and web OPFS vs Cache API use
   the same threshold. Do not collapse to all-OPFS or all-Cache without updating
-  docs and tests.
-- **Empty cached payload = miss** in the resolver; write-through failure never
-  fails a successful network resolve (diagnostics only).
+  docs and tests. Web hot reads with known index `byteLength` ≥ cut go OPFS-first
+  (skip Cache miss tax); twin-clear-before-write stays.
+- **Empty cached payload = miss** in the resolver; empty durable writes are
+  not retained (evict); sticky empty rows scrub on read; write-through failure
+  never fails a successful network resolve (diagnostics only; throwing
+  `onEvent` is swallowed).
 - **Open:** hard storage failure degrades to `MemoryImageBytesCache` unless
-  `throwOnOpenFailure`; missing VM `directory` still throws. `configure`
-  closes the previous shared instance before assign.
+  `throwOnOpenFailure`; partial VM worker / web handles are closed before
+  degrade or rethrow. Missing VM `directory` still throws. `configure`
+  closes the previous shared instance before assign. `ImageBytesResolver.shared`
+  re-reads process-wide cache/fetcher on each resolve (no one-shot snapshot).
+  `resetShared` also clears resolver shared wiring.
 - **Retention:** TTL on read; capacity on write/prune; no background timer.
-  `standard` = 14 days / 500 entries / 50 MiB.
+  `standard` = 14 days / 500 entries / 50 MiB. Non-positive `maxEntries` /
+  `maxBytes` assert.
 
 ## Gotchas quick-reference
 
 - Header key casing and map order must not change identity or coalesce keys
   (`ImageCacheKey.canonicalHeaders`).
+- Coalesce and durable identity use `ImageCacheKey` (length-prefixed fingerprint
+  material; no `url|headers` join). Relative vs absolute `Uri.base` equivalents
+  share one key; explicit `cacheKey` is full identity (headers on wire only).
 - Distinct URLs that share a basename must not collide on disk (fingerprint).
 - VM store under app **cache** root, not documents. Web ignores `directory`.
 - `MemoryImageBytesCache` / `NoOpImageBytesCache` stay usable after `close`;
   Indexed and durable wrappers throw after close.
 - Web payload Cache keys are synthetic `https://image-bytes.invalid/...`, not
   the real fetch URL.
-- `HttpBytesFetcher` timeout does not cover pool wait time.
+- `HttpBytesFetcher` timeout does not cover pool wait time (intentionally
+  unbounded queue); timeout uses `AbortableRequest` after a slot is acquired.
 - Chrome open test is the honesty check for Cache/OPFS; do not merge web blob
   changes on green VM tests alone.
 

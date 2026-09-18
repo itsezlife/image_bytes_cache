@@ -228,6 +228,194 @@ void main() {
       expect(httpClient.requestCount, 2);
       expect(find.byType(SvgPicture), findsOneWidget);
     });
+
+    testWidgets(
+      'malformed SVG bytes invoke onError and errorBuilder (not endless placeholder)',
+      (tester) async {
+        httpClient.bodyOverride = Uint8List.fromList('<!-- not an svg -->'.codeUnits);
+        final errors = <Object>[];
+
+        await tester.pumpWidget(
+          wrap(
+            CachedNetworkSvgImage(
+              'https://cdn.example.com/bad.svg',
+              placeholderBuilder: (_) => const Text('loading…'),
+              onError: (error, stackTrace) => errors.add(error),
+              errorBuilder: (_, __, ___) => const Text('paint-failed'),
+            ),
+          ),
+        );
+
+        await settle(tester, () => errors.isNotEmpty);
+        await tester.pumpAndSettle();
+
+        expect(errors, isNotEmpty);
+        expect(find.text('paint-failed'), findsOneWidget);
+        expect(find.text('loading…'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'null vs empty headers and header key casing do not force reload',
+      (tester) async {
+        const url = 'https://cdn.example.com/identity.svg';
+
+        await tester.pumpWidget(wrap(const CachedNetworkSvgImage(url)));
+        await settle(tester, () => httpClient.requestCount >= 1);
+        await tester.pump();
+        expect(httpClient.requestCount, 1);
+
+        await tester.pumpWidget(
+          wrap(const CachedNetworkSvgImage(url, headers: {})),
+        );
+        await tester.pump();
+        expect(httpClient.requestCount, 1);
+
+        await tester.pumpWidget(
+          wrap(
+            const CachedNetworkSvgImage(
+              url,
+              headers: {'Authorization': 'Bearer same'},
+            ),
+          ),
+        );
+        await settle(tester, () => httpClient.requestCount >= 2);
+        await tester.pump();
+        expect(httpClient.requestCount, 2);
+
+        await tester.pumpWidget(
+          wrap(
+            const CachedNetworkSvgImage(
+              url,
+              headers: {'authorization': 'Bearer same'},
+            ),
+          ),
+        );
+        await tester.pump();
+        expect(httpClient.requestCount, 2);
+      },
+    );
+
+    testWidgets('Authorization value change forces reload', (tester) async {
+      const url = 'https://cdn.example.com/auth.svg';
+
+      await tester.pumpWidget(
+        wrap(
+          const CachedNetworkSvgImage(
+            url,
+            headers: {'Authorization': 'Bearer a'},
+          ),
+        ),
+      );
+      await settle(tester, () => httpClient.requestCount >= 1);
+      await tester.pump();
+
+      await tester.pumpWidget(
+        wrap(
+          const CachedNetworkSvgImage(
+            url,
+            headers: {'Authorization': 'Bearer b'},
+          ),
+        ),
+      );
+      await settle(tester, () => httpClient.requestCount >= 2);
+      await tester.pump();
+
+      expect(httpClient.requestCount, 2);
+    });
+
+    testWidgets(
+      'oversized payloads are not written to PageStorage; small remount still restores',
+      (tester) async {
+        const smallUrl = 'https://cdn.example.com/small-storage.svg';
+        const largeUrl = 'https://cdn.example.com/large-storage.svg';
+        final bucket = PageStorageBucket();
+        final smallKey = GlobalKey();
+        final largeKey = GlobalKey();
+
+        await tester.pumpWidget(
+          wrap(CachedNetworkSvgImage(smallUrl, key: smallKey), bucket: bucket),
+        );
+        await settle(tester, () => httpClient.requestCount >= 1);
+        await tester.pump();
+
+        final smallStored = bucket.readState(
+          smallKey.currentContext!,
+          identifier: ImageCacheKey.fromUrl(smallUrl).value,
+        );
+        expect(smallStored, isA<Uint8List>());
+
+        const pageStorageMaxBytes = 16;
+        httpClient.bodyOverride = Uint8List(pageStorageMaxBytes + 1);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpWidget(
+          wrap(
+            CachedNetworkSvgImage(
+              largeUrl,
+              key: largeKey,
+              pageStorageMaxBytes: pageStorageMaxBytes,
+              errorBuilder: (_, __, ___) => const Text('large-paint-failed'),
+            ),
+            bucket: bucket,
+          ),
+        );
+        await settle(tester, () => httpClient.requestCount >= 2);
+        await tester.pumpAndSettle();
+
+        final largeStored = bucket.readState(
+          largeKey.currentContext!,
+          identifier: ImageCacheKey.fromUrl(largeUrl).value,
+        );
+        expect(largeStored, isNull);
+
+        await cache.evict(ImageCacheKey.fromUrl(smallUrl));
+        httpClient.bodyOverride = null;
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpWidget(
+          wrap(const CachedNetworkSvgImage(smallUrl), bucket: bucket),
+        );
+        await tester.pump();
+
+        expect(find.byType(SvgPicture), findsOneWidget);
+        expect(httpClient.requestCount, 2);
+      },
+    );
+
+    testWidgets(
+      'url change keeps previous SvgPicture instead of forcing placeholder flash',
+      (tester) async {
+        final gate = Completer<void>();
+        httpClient.requestDelay = null;
+
+        await tester.pumpWidget(
+          wrap(const CachedNetworkSvgImage('https://cdn.example.com/keep-a.svg')),
+        );
+        await settle(tester, () => httpClient.requestCount >= 1);
+        await tester.pump();
+        expect(find.byType(SvgPicture), findsOneWidget);
+
+        httpClient.requestDelay = gate.future;
+        await tester.pumpWidget(
+          wrap(
+            CachedNetworkSvgImage(
+              'https://cdn.example.com/keep-b.svg',
+              placeholderBuilder: (_) => const Text('loading…'),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(find.byType(SvgPicture), findsOneWidget);
+        expect(find.text('loading…'), findsNothing);
+
+        await tester.runAsync(() async {
+          gate.complete();
+        });
+        await settle(tester, () => httpClient.requestCount >= 2);
+        await tester.pump();
+        expect(find.byType(SvgPicture), findsOneWidget);
+      },
+    );
   });
 }
 
@@ -237,6 +425,7 @@ class _RecordingClient extends http.BaseClient {
   Future<void>? requestDelay;
   int requestCount = 0;
   Map<String, String>? lastHeaders;
+  Uint8List? bodyOverride;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
@@ -250,7 +439,11 @@ class _RecordingClient extends http.BaseClient {
       throw error;
     }
 
-    final body = statusCode == 200 ? utf8SvgBytes() : Uint8List(0);
+    final body = switch ((statusCode, bodyOverride)) {
+      (200, final override?) => override,
+      (200, null) => utf8SvgBytes(),
+      _ => Uint8List(0),
+    };
     return http.StreamedResponse(
       Stream<List<int>>.value(body),
       statusCode,

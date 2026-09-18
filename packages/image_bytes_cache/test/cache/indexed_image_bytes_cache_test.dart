@@ -33,6 +33,63 @@ void main() {
       expect(index.records[key.value]?.byteLength, 4);
     });
 
+    test('hot-path blob read forwards index byteLength as knownByteLength', () async {
+      const key = ImageCacheKey('sized');
+      final bytes = Uint8List.fromList([9, 8, 7, 6]);
+
+      await cache.write(key, bytes);
+      blobs.lastKnownByteLength = null;
+
+      expect(await cache.read(key), bytes);
+      expect(blobs.lastKnownByteLength, bytes.length);
+    });
+
+    test('empty write is not retained as capacity waste', () async {
+      cache = IndexedImageBytesCache(
+        index: index,
+        blobs: blobs,
+        retention: const ImageBytesRetention.maxEntries(1),
+        clock: () => now,
+      );
+      const emptyKey = ImageCacheKey('empty');
+      const keepKey = ImageCacheKey('keep');
+
+      await cache.write(emptyKey, Uint8List(0));
+      expect(await cache.read(emptyKey), isNull);
+      expect(blobs.store.containsKey(emptyKey.value), isFalse);
+      expect(index.records.containsKey(emptyKey.value), isFalse);
+
+      await cache.write(keepKey, Uint8List.fromList([1]));
+      expect(await cache.read(keepKey), Uint8List.fromList([1]));
+    });
+
+    test('empty write evicts a previously stored payload for the same key', () async {
+      const key = ImageCacheKey('logo');
+      await cache.write(key, Uint8List.fromList([1, 2]));
+
+      await cache.write(key, Uint8List(0));
+
+      expect(await cache.read(key), isNull);
+      expect(blobs.store.containsKey(key.value), isFalse);
+      expect(index.records.containsKey(key.value), isFalse);
+    });
+
+    test('read of sticky empty payload misses and scrubs the entry', () async {
+      const key = ImageCacheKey('sticky');
+      // Simulate a legacy empty durable row that predates empty-write rejection.
+      blobs.store[key.value] = Uint8List(0);
+      index.records[key.value] = ImageBytesRecord(
+        key: key,
+        writtenAt: now,
+        accessedAt: now,
+        byteLength: 0,
+      );
+
+      expect(await cache.read(key), isNull);
+      expect(blobs.store.containsKey(key.value), isFalse);
+      expect(index.records.containsKey(key.value), isFalse);
+    });
+
     test('read does not persist access to the index (soft LRU)', () async {
       const key = ImageCacheKey('logo');
       await cache.write(key, Uint8List.fromList([1]));
@@ -293,6 +350,39 @@ void main() {
       );
       await expectLater(cache.prune(), throwsA(isA<StateError>()));
     });
+
+    test('commit failure rolls RAM back — no optimistic durable hit', () async {
+      const priorKey = ImageCacheKey('prior');
+      const failedKey = ImageCacheKey('failed');
+      final priorBytes = Uint8List.fromList([1, 1]);
+      final failedBytes = Uint8List.fromList([2, 2, 2]);
+
+      await cache.write(priorKey, priorBytes);
+      index.commitError = StateError('durable index commit failed');
+
+      await expectLater(cache.write(failedKey, failedBytes), throwsA(isA<StateError>()));
+
+      // Must not treat the optimistic RAM put as a durable hit.
+      expect(await cache.read(failedKey), isNull);
+      expect(index.records.containsKey(failedKey.value), isFalse);
+      // Last good commit snapshot stays readable.
+      expect(await cache.read(priorKey), priorBytes);
+      expect(index.records.containsKey(priorKey.value), isTrue);
+    });
+
+    test('commit failure on evict restores the index row', () async {
+      const key = ImageCacheKey('keep');
+      final bytes = Uint8List.fromList([7]);
+      await cache.write(key, bytes);
+      index.commitError = StateError('durable index commit failed');
+
+      await expectLater(cache.evict(key), throwsA(isA<StateError>()));
+
+      // Blob may already be gone. Index must not stay deleted after a failed
+      // commit as if durable eviction had succeeded. Restore last-good meta
+      // so the store does not claim the eviction completed.
+      expect(index.records.containsKey(key.value), isTrue);
+    });
   });
 }
 
@@ -301,6 +391,7 @@ final class _FakeIndex implements IImageBytesIndex {
   int putCount = 0;
   int commitCount = 0;
   Duration opDelay = Duration.zero;
+  Error? commitError;
 
   Future<void> _delay() async {
     if (opDelay > Duration.zero) {
@@ -336,6 +427,10 @@ final class _FakeIndex implements IImageBytesIndex {
   @override
   Future<void> commit() async {
     await _delay();
+    final error = commitError;
+    if (error != null) {
+      throw error;
+    }
     commitCount++;
   }
 }
@@ -345,6 +440,9 @@ final class _FakeBlobs implements IImageBytesBlobStore {
   Duration opDelay = Duration.zero;
   Future<void> Function()? readHook;
 
+  /// Last [knownByteLength] passed to [read], or `null` if never read / omitted.
+  int? lastKnownByteLength;
+
   Future<void> _delay() async {
     if (opDelay > Duration.zero) {
       await Future<void>.delayed(opDelay);
@@ -352,7 +450,8 @@ final class _FakeBlobs implements IImageBytesBlobStore {
   }
 
   @override
-  Future<Uint8List?> read(ImageCacheKey key) async {
+  Future<Uint8List?> read(ImageCacheKey key, {int? knownByteLength}) async {
+    lastKnownByteLength = knownByteLength;
     await readHook?.call();
     await _delay();
     return store[key.value];

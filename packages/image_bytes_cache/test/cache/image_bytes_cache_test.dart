@@ -98,6 +98,30 @@ void main() {
 
       expect(await cache.read(key), isNull);
     });
+
+    test('empty write is not retained as capacity waste', () async {
+      final cache = MemoryImageBytesCache(
+        retention: const ImageBytesRetention.maxEntries(1),
+      );
+      const emptyKey = ImageCacheKey('empty');
+      const keepKey = ImageCacheKey('keep');
+
+      await cache.write(emptyKey, Uint8List(0));
+      expect(await cache.read(emptyKey), isNull);
+
+      await cache.write(keepKey, Uint8List.fromList([1]));
+      expect(await cache.read(keepKey), Uint8List.fromList([1]));
+    });
+
+    test('empty write evicts a previously stored payload for the same key', () async {
+      final cache = MemoryImageBytesCache();
+      const key = ImageCacheKey('logo');
+      await cache.write(key, Uint8List.fromList([1, 2]));
+
+      await cache.write(key, Uint8List(0));
+
+      expect(await cache.read(key), isNull);
+    });
   });
 
   group('NoOpImageBytesCache', () {
@@ -190,6 +214,41 @@ void main() {
       expect(b.value.length, lessThanOrEqualTo(180));
       expect(a, isNot(equals(b)));
     });
+
+    test('relative and absolute Uri.base equivalents share one key', () {
+      const relative = 'icons/logo.svg';
+      final absolute = Uri.base.resolve(relative).toString();
+      expect(ImageCacheKey.fromUrl(relative), equals(ImageCacheKey.fromUrl(absolute)));
+    });
+
+    test('URL containing |… without headers differs from clean URL plus those headers', () {
+      final poisoned = ImageCacheKey.fromUrl(
+        'https://cdn.example.com/a.svg|authorization=Bearer x',
+      );
+      final clean = ImageCacheKey.fromUrl(
+        'https://cdn.example.com/a.svg',
+        headers: const {'Authorization': 'Bearer x'},
+      );
+      expect(poisoned, isNot(equals(clean)));
+    });
+
+    test('pipe inside a header value cannot forge another URL+headers fingerprint', () {
+      final withPipeInValue = ImageCacheKey.fromUrl(
+        'https://cdn.example.com/a.svg',
+        headers: const {'authorization': 'Bearer x|foo=bar'},
+      );
+      final withPipeInUrl = ImageCacheKey.fromUrl(
+        'https://cdn.example.com/a.svg|authorization=Bearer x',
+        headers: const {'foo': 'bar'},
+      );
+      expect(withPipeInValue, isNot(equals(withPipeInUrl)));
+      // Same host/basename would still collide if fingerprint material used a
+      // raw `url|headers` join — assert the trailing fingerprint segments differ.
+      expect(
+        withPipeInValue.value.substring(withPipeInValue.value.length - 12),
+        isNot(equals(withPipeInUrl.value.substring(withPipeInUrl.value.length - 12))),
+      );
+    });
   });
 
   group('ImageBytesRetention.standard', () {
@@ -198,6 +257,38 @@ void main() {
       expect(limits.maxAge, const Duration(days: 14));
       expect(limits.maxEntries, 500);
       expect(limits.maxBytes, 50 * 1024 * 1024);
+    });
+  });
+
+  group('ImageBytesRetention capacity invariants', () {
+    test('rejects non-positive maxEntries', () {
+      expect(
+        () => ImageBytesRetention.maxEntries(0),
+        throwsA(isA<AssertionError>()),
+      );
+      expect(
+        () => ImageBytesRetention.maxEntries(-1),
+        throwsA(isA<AssertionError>()),
+      );
+      expect(
+        () => ImageBytesRetention.compound(maxEntries: 0),
+        throwsA(isA<AssertionError>()),
+      );
+    });
+
+    test('rejects non-positive maxBytes', () {
+      expect(
+        () => ImageBytesRetention.maxBytes(0),
+        throwsA(isA<AssertionError>()),
+      );
+      expect(
+        () => ImageBytesRetention.maxBytes(-1),
+        throwsA(isA<AssertionError>()),
+      );
+      expect(
+        () => ImageBytesRetention.compound(maxBytes: 0),
+        throwsA(isA<AssertionError>()),
+      );
     });
   });
 

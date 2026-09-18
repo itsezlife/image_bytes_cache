@@ -8,16 +8,19 @@ import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 ///
 /// Bodies below [opfsByteThreshold] use Cache API Responses with synthetic
 /// `.invalid` URLs ([ImageBytesBlobStore$Cache$JS]). Bodies at or above the
-/// threshold use OPFS files ([ImageBytesBlobStore$Opfs$JS]) so large rasters
+/// threshold use OPFS files ([ImageBytesBlobStore$Opfs$JS]) so large payloads
 /// avoid Cache API structured-clone cost. Meta stays on the separate Cache
 /// index document; prune / LRU never scan payload bytes to decide eviction.
 ///
 /// [write] routes by length and deletes the key from the other backend so a
-/// resize across the threshold cannot leave a stale twin. [read] checks Cache
-/// then OPFS. [reclaimOrphans] / [wipeAll] cover both backends under the brain's
-/// exclusive domain. No IsolateController on this path.
-final class ImageBytesBlobStore$Web$JS implements IImageBytesBlobStore {
-  ImageBytesBlobStore$Web$JS._({
+/// resize across the threshold cannot leave a stale twin. [read] uses
+/// [knownByteLength] from the RAM index when present: at or above the
+/// threshold it goes straight to OPFS (skipping a guaranteed Cache miss);
+/// otherwise it checks Cache then OPFS. [reclaimOrphans] / [wipeAll] cover both
+/// backends under the brain's exclusive domain. No IsolateController on this
+/// path.
+final class ImageBytesBlobStore$Routed$JS implements IImageBytesBlobStore {
+  ImageBytesBlobStore$Routed$JS._({
     required ImageBytesBlobStore$Cache$JS cache,
     required ImageBytesBlobStore$Opfs$JS opfs,
   }) : _cache = cache,
@@ -25,9 +28,9 @@ final class ImageBytesBlobStore$Web$JS implements IImageBytesBlobStore {
 
   /// Payloads at or above this size are stored in OPFS; smaller ones in Cache API.
   ///
-  /// Matches the VM transferable write threshold so "small SVG vs large raster"
-  /// is one documented cut across platforms. Below it, Cache API is enough and
-  /// avoids OPFS open/write ceremony for chrome assets.
+  /// Matches the VM transferable write threshold so small vs large bodies use
+  /// one documented cut across platforms. Below it, Cache API is enough and
+  /// avoids OPFS open/write ceremony for typical small assets.
   static const int opfsByteThreshold = 64 * 1024;
 
   final ImageBytesBlobStore$Cache$JS _cache;
@@ -35,11 +38,11 @@ final class ImageBytesBlobStore$Web$JS implements IImageBytesBlobStore {
   var _closed = false;
 
   /// Opens Cache API and OPFS payload backends.
-  static Future<ImageBytesBlobStore$Web$JS> open() async {
+  static Future<ImageBytesBlobStore$Routed$JS> open() async {
     final cache = await ImageBytesBlobStore$Cache$JS.open();
     try {
       final opfs = await ImageBytesBlobStore$Opfs$JS.open();
-      return ImageBytesBlobStore$Web$JS._(cache: cache, opfs: opfs);
+      return ImageBytesBlobStore$Routed$JS._(cache: cache, opfs: opfs);
     } on Object {
       await cache.close();
       rethrow;
@@ -47,8 +50,13 @@ final class ImageBytesBlobStore$Web$JS implements IImageBytesBlobStore {
   }
 
   @override
-  Future<Uint8List?> read(ImageCacheKey key) async {
+  Future<Uint8List?> read(ImageCacheKey key, {int? knownByteLength}) async {
     _ensureOpen();
+    // Index meta already implies OPFS: a Cache match would only burn a miss (or
+    // worse, return a stale twin left by a partial write). Skip Cache.
+    if (knownByteLength != null && knownByteLength >= opfsByteThreshold) {
+      return _opfs.read(key);
+    }
     final fromCache = await _cache.read(key);
     if (fromCache != null) return fromCache;
     return _opfs.read(key);
@@ -57,8 +65,9 @@ final class ImageBytesBlobStore$Web$JS implements IImageBytesBlobStore {
   @override
   Future<void> write(ImageCacheKey key, Uint8List bytes) async {
     _ensureOpen();
-    // Clear the other backend first so [read] (Cache-then-OPFS) cannot return a
-    // stale twin if the second half of the write fails after a successful put.
+    // Clear the other backend first so unhinted [read] (Cache-then-OPFS) cannot
+    // return a stale twin if the second half of the write fails after a
+    // successful put.
     if (bytes.lengthInBytes >= opfsByteThreshold) {
       await _cache.delete(key);
       await _opfs.write(key, bytes);
@@ -98,7 +107,7 @@ final class ImageBytesBlobStore$Web$JS implements IImageBytesBlobStore {
 
   void _ensureOpen() {
     if (_closed) {
-      throw StateError(r'ImageBytesBlobStore$Web$JS is closed');
+      throw StateError(r'ImageBytesBlobStore$Routed$JS is closed');
     }
   }
 }

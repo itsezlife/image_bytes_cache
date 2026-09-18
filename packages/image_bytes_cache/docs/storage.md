@@ -49,9 +49,10 @@ Mutate epoch shape:
 
 ```text
 exclusiveMutate:
+  snapshot RAM mirror (last-good meta)
   flush soft access into RAM map
   apply puts / deletes / trim (including blob IO)
-  commitDurableMetaOnce
+  commitDurableMetaOnce   // on throw: restore RAM from snapshot, rethrow
   reclaimOrphanBlobs(indexedKeys)   // prune and explicit reclaim
 ```
 
@@ -59,6 +60,15 @@ Without the single-commit rule, a soft-LRU flush that touches N keys would
 rewrite the durable index N times. Without the shared exclusive domain, orphan
 reclaim can delete a blob mid-write. Open wrappers must pass reclaim into the
 brain; they must not reclaim outside that gate.
+
+If `commit` throws after RAM (and possibly blob) mutation, the brain restores
+the RAM mirror to the pre-epoch snapshot and rethrows. We picked that over
+fail-closing the instance, and over leaving a "write failed but RAM hit"
+lie. Blob IO is not rolled back. A failed write may leave an orphan blob. A
+failed commit after trim, evict, or TTL may put index rows back whose
+payloads are already gone; the next read heals those as index-without-blob,
+and those previously durable bodies stay gone. Resolve write-through still
+reports the thrown write via diagnostics and does not fail paint.
 
 After `close`, Indexed ops throw `StateError`. Platform wrappers close isolate
 or Cache/OPFS handles around the brain.
@@ -77,15 +87,21 @@ Sealed `ImageBytesRetention`. TTL is checked on `read`. Capacity is trimmed on
 
 `ImageBytesRetention.standard` (default for `open`):
 
-| Limit | Value |
-| --- | --- |
-| `maxAge` | 14 days |
-| `maxEntries` | 500 |
-| `maxBytes` | 50 MiB |
+| Limit        | Value   |
+| ------------ | ------- |
+| `maxAge`     | 14 days |
+| `maxEntries` | 500     |
+| `maxBytes`   | 50 MiB  |
 
 Entry count alone would let a few large assets fill the device. The byte
 budget bounds that without a timer. Hosts may pass `compound`, `maxAge`,
-`maxEntries`, `maxBytes`, or `unlimited`.
+`maxEntries`, `maxBytes`, or `unlimited`. When set, `maxEntries` and
+`maxBytes` must be **positive** (asserted on the retention constructors);
+non-positive caps are nonsense policy.
+
+Empty payloads are not retained on `write` (treated as eviction of that key).
+A sticky empty durable row still misses on `read` and is scrubbed so it cannot
+waste entry capacity.
 
 Capacity trim evicts least-recently-accessed records after soft access has
 been flushed, so a just-read entry is not wrongly dropped when writing a new
@@ -93,10 +109,10 @@ one under `maxEntries`.
 
 ## Orphans
 
-| Case | When | Action |
-| --- | --- | --- |
-| Index without blob | Shared `read` probe | Upgrade to exclusive; delete index row; `commit` |
-| Blob without index | Open / `prune` / `reclaimOrphans` | Platform reclaim under exclusive gate |
+| Case               | When                              | Action                                           |
+| ------------------ | --------------------------------- | ------------------------------------------------ |
+| Index without blob | Shared `read` probe               | Upgrade to exclusive; delete index row; `commit` |
+| Blob without index | Open / `prune` / `reclaimOrphans` | Platform reclaim under exclusive gate            |
 
 Remote bytes are disposable: corrupt recovery prefers wipe over crash loops.
 
@@ -116,15 +132,22 @@ encode/decode through the codec (fused UTF-8 JSON converters), not peel
 
 ## VM durable path
 
-| Half | Implementation |
-| --- | --- |
+| Half  | Implementation                                                        |
+| ----- | --------------------------------------------------------------------- |
 | Index | Versioned JSON file; RAM mirror; `commit` via the blob isolate worker |
-| Blobs | One file per `ImageCacheKey.value` under the open directory |
+| Blobs | One file per `ImageCacheKey.value` under the open directory           |
 
 IO runs on a long-lived in-package `IsolateController` worker
 (`lib/src/isolate_controller.dart`). Sync `dart:io` stays off the UI
 isolate. Writes use temp then rename so a crash mid-write cannot leave a
 truncated final path that `read` would treat as a hit.
+
+When the worker dies (watchdog threshold, handler `#exit`, or an explicit
+kill), `ImageBytesBlobStore$File$VM` fails in-flight RPC futures with
+`StateError`, drops the dead controller, and allows a later op to respawn.
+That fail-fast path keeps the exclusive mutate gate from stalling forever on
+a hung blob future. Store `close` still fails pending with a closed
+`StateError` and refuses further RPCs.
 
 Bodies at or above `ImageBytesBlobStore$File$VM.transferByteThreshold`
 (64 KiB) cross the isolate boundary as `TransferableTypedData`. Smaller bodies
@@ -136,17 +159,18 @@ No per-write `compute`.
 
 ## Web durable path
 
-| Half | Implementation |
-| --- | --- |
-| Index | One Cache API JSON document (`ImageBytesWebKeys.indexCacheName`) |
-| Blobs under 64 KiB | Cache API Responses with synthetic `.invalid` URLs |
-| Blobs at or above 64 KiB | OPFS files under `opfsBlobsDirectoryName` |
+| Half                     | Implementation                                                   |
+| ------------------------ | ---------------------------------------------------------------- |
+| Index                    | One Cache API JSON document (`ImageBytesWebKeys.indexCacheName`) |
+| Blobs under 64 KiB       | Cache API Responses with synthetic `.invalid` URLs               |
+| Blobs at or above 64 KiB | OPFS files under `opfsBlobsDirectoryName`                        |
 
-`ImageBytesBlobStore$Web$JS.opfsByteThreshold` is 64 KiB, matching the VM
-transferable cut so “small chrome vs large raster” is one documented size
-policy. Writes route by length and delete the key from the other backend so a
-resize across the threshold cannot leave a stale twin. Reads check Cache then
-OPFS.
+`ImageBytesBlobStore$Routed$JS.opfsByteThreshold` is 64 KiB, matching the VM
+transferable cut so small and large bodies share one documented size policy.
+Writes route by length and delete the key from the other backend so a
+resize across the threshold cannot leave a stale twin. Reads use the RAM index
+`byteLength` when the brain already probed it: at or above the threshold they
+go straight to OPFS (no Cache match tax); otherwise they check Cache then OPFS.
 
 Synthetic keys use host `image-bytes.invalid` so payload entries never share
 identity with real network fetches and never invite accidental Cache `add()`

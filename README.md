@@ -7,7 +7,7 @@ Two packages live here:
 | Package | What you get |
 | --- | --- |
 | [`image_bytes_cache`](packages/image_bytes_cache/) | Open the cache, resolve URLs to bytes |
-| [`image_bytes_cache_flutter`](packages/image_bytes_cache_flutter/) | Widgets that paint those bytes (SVG today) |
+| [`image_bytes_cache_flutter`](packages/image_bytes_cache_flutter/) | Widgets that paint those bytes |
 
 The core package stores bytes only. Decoding and drawing stay with you or with the Flutter package.
 
@@ -37,7 +37,7 @@ await ImageBytesCache.configure(
 );
 
 final bytes = await ImageBytesResolver.shared().resolve(
-  ImageBytesRequest(url: 'https://cdn.example.com/logo.svg'),
+  ImageBytesRequest(url: 'https://cdn.example.com/logo.png'),
 );
 ```
 

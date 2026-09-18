@@ -9,9 +9,11 @@ import 'package:meta/meta.dart';
 
 /// Cache identity for remote image bytes (disk / durable store / PageStorage).
 ///
-/// Built so the string is safe as a filename: host + last path segment + a short
-/// hash of URL and headers. Without the hash, two URLs that share a basename
-/// would collide on disk.
+/// Filename-safe string: host + last path segment + a short fingerprint of the
+/// [Uri.base.resolve] canonical URL and canonical headers (length-prefixed
+/// material — not a `url|headers` join). Shared with [HttpBytesFetcher]
+/// coalesce via [value]. Without the fingerprint, two URLs that share a
+/// basename would collide on disk.
 @immutable
 final class ImageCacheKey {
   /// Wraps an already-safe [value] (tests, restore from storage).
@@ -19,19 +21,27 @@ final class ImageCacheKey {
 
   /// Derives [value] from [url] and optional [headers].
   ///
+  /// [url] is resolved with [Uri.base.resolve] before host/basename extraction
+  /// and fingerprinting, so a relative path and its absolute form against the
+  /// same base produce one key — matching the URI [ImageBytesResolver] GETs.
+  ///
   /// Header keys are lowercased and sorted before hashing so casing and map
   /// iteration order do not change identity (parity with
-  /// [HttpBytesFetcher] coalesce). Values stay as given. Distinct URLs that
-  /// share a basename still produce distinct keys via the fingerprint.
+  /// [HttpBytesFetcher] coalesce). Values stay as given. Fingerprint material
+  /// is a length-prefixed encoding of URL + canonical headers so a `|` (or any
+  /// other character) inside the URL or a header value cannot forge another
+  /// (url, headers) pair.
   ///
-  /// [value] is capped at [_maxValueLength] so hosts with long path segments
-  /// stay safe as filenames and web store keys (basename truncated; fingerprint
-  /// and host still distinguish collisions).
+  /// Distinct URLs that share a basename still produce distinct keys via the
+  /// fingerprint. [value] is capped at [_maxValueLength] so hosts with long
+  /// path segments stay safe as filenames and web store keys (basename
+  /// truncated; fingerprint and host still distinguish collisions).
   factory ImageCacheKey.fromUrl(
     String url, {
     Map<String, String>? headers,
   }) {
-    final uri = Uri.tryParse(url);
+    final canonicalUrl = Uri.base.resolve(url).toString();
+    final uri = Uri.tryParse(canonicalUrl);
     final host = switch (uri?.host) {
       final h? when h.isNotEmpty => h.replaceAll('.', '_'),
       _ => 'unknown',
@@ -41,10 +51,7 @@ final class ImageCacheKey {
       _ => 'asset',
     };
     var safeName = pathSeg.replaceAll(RegExp('[^a-zA-Z0-9._-]'), '_').replaceAll('..', '_');
-    final fingerprint = sha1
-        .convert(const Utf8Encoder().convert('$url|${canonicalHeaders(headers)}'))
-        .toString()
-        .substring(0, 12);
+    final fingerprint = sha1.convert(_fingerprintMaterial(canonicalUrl, headers)).toString().substring(0, 12);
     // Reserve room for host + '_' + '_' + 12-char fingerprint.
     final maxNameLen = (_maxValueLength - host.length - fingerprint.length - 2).clamp(8, _maxBasenameLength);
     if (safeName.length > maxNameLen) {
@@ -80,6 +87,29 @@ final class ImageCacheKey {
     return keys.map((k) => '$k=${normalized[k]}').join('&');
   }
 
+  /// Length-prefixed UTF-8 of canonical URL then canonical headers.
+  ///
+  /// Without length prefixes, a delimiter join such as `url|headers` lets a
+  /// URL that embeds `|…` forge the same fingerprint bytes as a clean URL plus
+  /// those headers (or a header value that embeds further `|` fields).
+  static List<int> _fingerprintMaterial(String canonicalUrl, Map<String, String>? headers) {
+    final urlBytes = const Utf8Encoder().convert(canonicalUrl);
+    final headerBytes = const Utf8Encoder().convert(canonicalHeaders(headers));
+    return <int>[
+      ..._u32be(urlBytes.length),
+      ...urlBytes,
+      ..._u32be(headerBytes.length),
+      ...headerBytes,
+    ];
+  }
+
+  static List<int> _u32be(int length) => <int>[
+    (length >> 24) & 0xff,
+    (length >> 16) & 0xff,
+    (length >> 8) & 0xff,
+    length & 0xff,
+  ];
+
   @override
   bool operator ==(Object other) => identical(this, other) || other is ImageCacheKey && other.value == value;
 
@@ -107,14 +137,22 @@ sealed class ImageBytesRetention {
   const factory ImageBytesRetention.maxAge(Duration maxAge) = ImageBytesRetentionMaxAge;
 
   /// Keep at most [maxEntries] (LRU by last access).
+  ///
+  /// [maxEntries] must be positive — a zero or negative cap is nonsense
+  /// retention that would either retain nothing useful or never trim.
   const factory ImageBytesRetention.maxEntries(int maxEntries) = ImageBytesRetentionMaxEntries;
 
   /// Keep total payload size at or under [maxBytes] (LRU by last access).
+  ///
+  /// [maxBytes] must be positive — a non-positive byte budget cannot describe
+  /// a usable capacity policy.
   const factory ImageBytesRetention.maxBytes(int maxBytes) = ImageBytesRetentionMaxBytes;
 
   /// Combine optional TTL and capacity limits.
   ///
   /// Null fields are ignored. Use this when you need more than one constraint.
+  /// When set, [maxEntries] and [maxBytes] must be positive (same invariant as
+  /// the dedicated factories).
   const factory ImageBytesRetention.compound({
     Duration? maxAge,
     int? maxEntries,
@@ -184,7 +222,7 @@ final class ImageBytesRetentionMaxAge extends ImageBytesRetention {
 @immutable
 final class ImageBytesRetentionMaxEntries extends ImageBytesRetention {
   /// See [ImageBytesRetention.maxEntries].
-  const ImageBytesRetentionMaxEntries(this.maxEntries);
+  const ImageBytesRetentionMaxEntries(this.maxEntries) : assert(maxEntries > 0, 'maxEntries must be > 0');
 
   /// Maximum number of keys retained.
   final int maxEntries;
@@ -194,7 +232,7 @@ final class ImageBytesRetentionMaxEntries extends ImageBytesRetention {
 @immutable
 final class ImageBytesRetentionMaxBytes extends ImageBytesRetention {
   /// See [ImageBytesRetention.maxBytes].
-  const ImageBytesRetentionMaxBytes(this.maxBytes);
+  const ImageBytesRetentionMaxBytes(this.maxBytes) : assert(maxBytes > 0, 'maxBytes must be > 0');
 
   /// Maximum sum of [ImageBytesRecord.byteLength] across entries.
   final int maxBytes;
@@ -208,7 +246,8 @@ final class ImageBytesRetentionCompound extends ImageBytesRetention {
     this.maxAge,
     this.maxEntries,
     this.maxBytes,
-  });
+  }) : assert(maxEntries == null || maxEntries > 0, 'maxEntries must be > 0 when set'),
+       assert(maxBytes == null || maxBytes > 0, 'maxBytes must be > 0 when set');
 
   /// Optional TTL since write.
   final Duration? maxAge;
@@ -314,7 +353,13 @@ abstract interface class IImageBytesIndex {
 /// Bytes only. Retention and timestamps live on [IImageBytesIndex].
 abstract interface class IImageBytesBlobStore {
   /// Returns payload bytes for [key], or `null` if missing.
-  Future<Uint8List?> read(ImageCacheKey key);
+  ///
+  /// [knownByteLength] is an optional hint from the RAM index row already
+  /// probed by [IndexedImageBytesCache]. Web size-routed stores use it to skip
+  /// a guaranteed Cache API miss when the body lives in OPFS; other backends
+  /// ignore it. Callers that do not know the length omit the argument and get
+  /// the store's default probe order.
+  Future<Uint8List?> read(ImageCacheKey key, {int? knownByteLength});
 
   /// Writes or replaces payload bytes for [key].
   Future<void> write(ImageCacheKey key, Uint8List bytes);
@@ -332,6 +377,11 @@ abstract interface class IImageBytesCache {
   Future<Uint8List?> read(ImageCacheKey key);
 
   /// Stores [bytes] under [key] and applies capacity retention.
+  ///
+  /// Empty [bytes] are not retained: the write is treated as eviction of [key]
+  /// when present. An empty durable row would still count toward
+  /// [ImageBytesRetention.maxEntries] while never painting, so hosts must not
+  /// be able to stick zero-length capacity waste through this API.
   Future<void> write(ImageCacheKey key, Uint8List bytes);
 
   /// Deletes one key if present (index and payload when composed).
@@ -360,7 +410,7 @@ abstract interface class IImageBytesCache {
 ///
 /// ## Mutate epoch
 ///
-/// The following operations share a single, exclusive domain (ensuring all readers
+/// The following operations share a single, exclusive domain (all readers
 /// complete first):
 /// - [write]
 /// - [evict]
@@ -370,14 +420,29 @@ abstract interface class IImageBytesCache {
 /// - [close]
 ///
 /// Within a mutate epoch, the following steps are performed:
-///  1. Flush soft access into the RAM mirror.
-///  2. Apply puts, deletes, and capacity trim in RAM (including blob I/O).
-///  3. Call [IImageBytesIndex.commit] **once**.
-///  4. For [prune] (and explicit [reclaimOrphans]), run orphan blob reclamation.
+///  1. Snapshot the RAM mirror (last-good meta for rollback).
+///  2. Flush soft access into the RAM mirror.
+///  3. Apply puts, deletes, and capacity trim in RAM (including blob I/O).
+///  4. Call [IImageBytesIndex.commit] **once**.
+///  5. For [prune] (and explicit [reclaimOrphans]), run orphan blob reclamation.
 ///
 /// Without that single-commit rule, a soft-LRU flush that touches N keys would
 /// rewrite the durable index N times. Without the shared exclusive domain,
 /// orphan reclaim can delete a blob mid-write.
+///
+/// ## Commit failure
+///
+/// If [IImageBytesIndex.commit] throws after the RAM (and possibly blob) half
+/// has already mutated, the brain rolls the RAM mirror back to the pre-epoch
+/// snapshot and rethrows. Later in-process [read]s must not treat the
+/// optimistic put as a durable hit. Blob halves are not rolled back. A failed
+/// write may leave an orphan blob. A failed commit after trim, evict, or TTL
+/// may put index rows back whose payloads were already deleted; the next read
+/// heals those as index-without-blob, and those victim bodies are not
+/// recovered. We chose that over "write failed but RAM hit" and over
+/// fail-closing the whole instance on a transient durable-meta error.
+/// [ImageBytesResolver] write-through still sees the thrown [write] and
+/// reports via diagnostics without failing a successful network resolve.
 ///
 /// After [close], further operations throw [StateError].
 final class IndexedImageBytesCache implements IImageBytesCache {
@@ -436,8 +501,10 @@ final class IndexedImageBytesCache implements IImageBytesCache {
         return const _ReadProbe.needsDelete();
       }
 
-      final bytes = await _blobs.read(key);
+      final bytes = await _blobs.read(key, knownByteLength: record.byteLength);
       if (bytes == null) return const _ReadProbe.needsIndexDelete();
+      // Legacy / corrupt empty rows still count toward capacity; scrub as miss.
+      if (bytes.isEmpty) return const _ReadProbe.needsDelete();
 
       _pendingAccess[key] = now;
       return _ReadProbe.hit(bytes);
@@ -448,6 +515,7 @@ final class IndexedImageBytesCache implements IImageBytesCache {
       _ReadProbeMiss() => null,
       _ReadProbeNeedsDelete() => _runExclusive(() async {
         _ensureOpen();
+        final preEpoch = await _captureIndexSnapshot();
         // Re-check under the exclusive gate: a write may have refreshed the
         // entry after the shared probe decided it was expired.
         final record = await _index.get(key);
@@ -458,37 +526,43 @@ final class IndexedImageBytesCache implements IImageBytesCache {
           null => false,
         };
         if (!expired) {
-          return _finishSharedHit(key, now);
+          return _finishSharedHit(key, now, preEpoch, record.byteLength);
         }
         await _deleteBoth(key);
-        await _index.commit();
+        await _commitOrRollback(preEpoch);
         return null;
       }),
       _ReadProbeNeedsIndexDelete() => _runExclusive(() async {
         _ensureOpen();
+        final preEpoch = await _captureIndexSnapshot();
         // Re-check: a write may have restored the blob after the shared probe.
         final record = await _index.get(key);
         if (record == null) return null;
-        final bytes = await _blobs.read(key);
+        final bytes = await _blobs.read(key, knownByteLength: record.byteLength);
         if (bytes != null) {
           _pendingAccess[key] = _clock();
           return bytes;
         }
         _pendingAccess.remove(key);
         await _index.delete(key);
-        await _index.commit();
+        await _commitOrRollback(preEpoch);
         return null;
       }),
     };
   }
 
   /// Blob hit after meta was already confirmed present and not expired.
-  Future<Uint8List?> _finishSharedHit(ImageCacheKey key, DateTime now) async {
-    final bytes = await _blobs.read(key);
-    if (bytes == null) {
+  Future<Uint8List?> _finishSharedHit(
+    ImageCacheKey key,
+    DateTime now,
+    Map<ImageCacheKey, ImageBytesRecord> preEpoch,
+    int knownByteLength,
+  ) async {
+    final bytes = await _blobs.read(key, knownByteLength: knownByteLength);
+    if (bytes == null || bytes.isEmpty) {
       _pendingAccess.remove(key);
-      await _index.delete(key);
-      await _index.commit();
+      await _deleteBoth(key);
+      await _commitOrRollback(preEpoch);
       return null;
     }
     _pendingAccess[key] = now;
@@ -496,31 +570,41 @@ final class IndexedImageBytesCache implements IImageBytesCache {
   }
 
   /// Writes payload + RAM meta, flushes soft access, trims, commits once.
+  ///
+  /// Empty [bytes] evict [key] instead of storing a zero-length row that would
+  /// still occupy an entry slot under capacity retention.
   @override
-  Future<void> write(ImageCacheKey key, Uint8List bytes) => _runExclusive(() async {
-    _ensureOpen();
-    await _flushPendingAccess();
-    final now = _clock();
-    await _blobs.write(key, bytes);
-    await _index.put(
-      ImageBytesRecord(
-        key: key,
-        writtenAt: now,
-        accessedAt: now,
-        byteLength: bytes.length,
-      ),
-    );
-    await _trimCapacity();
-    await _index.commit();
-  });
+  Future<void> write(ImageCacheKey key, Uint8List bytes) {
+    if (bytes.isEmpty) {
+      return evict(key);
+    }
+    return _runExclusive(() async {
+      _ensureOpen();
+      final preEpoch = await _captureIndexSnapshot();
+      await _flushPendingAccess();
+      final now = _clock();
+      await _blobs.write(key, bytes);
+      await _index.put(
+        ImageBytesRecord(
+          key: key,
+          writtenAt: now,
+          accessedAt: now,
+          byteLength: bytes.length,
+        ),
+      );
+      await _trimCapacity();
+      await _commitOrRollback(preEpoch);
+    });
+  }
 
   /// Removes index row, payload, and any pending access for [key].
   @override
   Future<void> evict(ImageCacheKey key) => _runExclusive(() async {
     _ensureOpen();
+    final preEpoch = await _captureIndexSnapshot();
     _pendingAccess.remove(key);
     await _deleteBoth(key);
-    await _index.commit();
+    await _commitOrRollback(preEpoch);
   });
 
   /// Flushes soft access, drops expired entries, capacity-trims, commits once,
@@ -528,6 +612,7 @@ final class IndexedImageBytesCache implements IImageBytesCache {
   @override
   Future<ImageBytesPruneReport> prune() => _runExclusive(() async {
     _ensureOpen();
+    final preEpoch = await _captureIndexSnapshot();
     await _flushPendingAccess();
     final evicted = <ImageCacheKey>[];
     var freed = 0;
@@ -546,7 +631,7 @@ final class IndexedImageBytesCache implements IImageBytesCache {
     }
 
     freed += await _trimCapacity(evicted: evicted);
-    await _index.commit();
+    await _commitOrRollback(preEpoch);
     await _reclaimOrphansUnlocked();
     return ImageBytesPruneReport(evictedKeys: evicted, freedBytes: freed);
   });
@@ -623,6 +708,50 @@ final class IndexedImageBytesCache implements IImageBytesCache {
   void _ensureOpen() {
     if (_closed) {
       throw StateError('IndexedImageBytesCache is closed');
+    }
+  }
+
+  /// Last-good RAM meta before this mutate epoch touches the mirror.
+  ///
+  /// [ImageBytesRecord] is immutable, so holding the instances is a faithful
+  /// snapshot of the pre-epoch map.
+  Future<Map<ImageCacheKey, ImageBytesRecord>> _captureIndexSnapshot() async => {
+    for (final record in await _index.values()) record.key: record,
+  };
+
+  /// Persists once; on failure restores the RAM mirror to [preEpoch] and rethrows.
+  ///
+  /// Without rollback, a thrown commit would leave optimistic puts/deletes as
+  /// in-process hits that no longer match durable storage ("write failed but
+  /// hit"). Blob IO is not rolled back. A failed write may leave an orphan
+  /// blob. A failed commit after trim, evict, or TTL may put index rows back
+  /// whose payloads were already deleted; the next read heals those as
+  /// index-without-blob, and those previously durable bodies stay gone. That
+  /// cost beats fail-closing the whole instance on a transient meta error.
+  Future<void> _commitOrRollback(Map<ImageCacheKey, ImageBytesRecord> preEpoch) async {
+    try {
+      await _index.commit();
+    } catch (error, stackTrace) {
+      await _restoreIndexMirror(preEpoch);
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
+  Future<void> _restoreIndexMirror(Map<ImageCacheKey, ImageBytesRecord> before) async {
+    final current = (await _index.values()).toList();
+    for (final record in current) {
+      if (!before.containsKey(record.key)) {
+        await _index.delete(record.key);
+      }
+    }
+    for (final MapEntry(:key, :value) in before.entries) {
+      final live = await _index.get(key);
+      if (live == null ||
+          live.writtenAt != value.writtenAt ||
+          live.accessedAt != value.accessedAt ||
+          live.byteLength != value.byteLength) {
+        await _index.put(value);
+      }
     }
   }
 
@@ -731,12 +860,16 @@ final class MemoryImageBytesCache implements IImageBytesCache {
 
   final Map<ImageCacheKey, _MemoryEntry> _entries = {};
 
-  /// Returns bytes or `null` if missing / past TTL.
+  /// Returns bytes or `null` if missing / past TTL / empty sticky payload.
   @override
   Future<Uint8List?> read(ImageCacheKey key) async {
     if (_entries[key] case final entry?) {
       final now = _clock();
       if (retention.limits.maxAge case final maxAge? when now.difference(entry.writtenAt) > maxAge) {
+        _entries.remove(key);
+        return null;
+      }
+      if (entry.bytes.isEmpty) {
         _entries.remove(key);
         return null;
       }
@@ -748,8 +881,15 @@ final class MemoryImageBytesCache implements IImageBytesCache {
   }
 
   /// Stores [bytes] and trims capacity if needed.
+  ///
+  /// Empty [bytes] evict [key] instead of retaining a zero-length entry that
+  /// still consumes [ImageBytesRetention.maxEntries] capacity.
   @override
   Future<void> write(ImageCacheKey key, Uint8List bytes) async {
+    if (bytes.isEmpty) {
+      _entries.remove(key);
+      return;
+    }
     final now = _clock();
     _entries[key] = _MemoryEntry(
       bytes: bytes,
@@ -881,9 +1021,11 @@ abstract final class ImageBytesCache {
   ///
   /// Hard open failures (quota, private mode, filesystem / Cache / OPFS errors)
   /// degrade to [MemoryImageBytesCache] with a warning unless
-  /// [throwOnOpenFailure] is true. [ArgumentError] from a missing VM
-  /// [directory] still throws: that is a host wiring bug, not storage
-  /// unavailability.
+  /// [throwOnOpenFailure] is true. Platform open hooks close any partially
+  /// opened VM worker or web handles before the failure surfaces here, so
+  /// neither degrade nor strict rethrow leaks isolates or Cache/OPFS quota.
+  /// [ArgumentError] from a missing VM [directory] still throws: that is a
+  /// host wiring bug, not storage unavailability.
   static Future<IImageBytesCache> open({
     String? directory,
     ImageBytesRetention retention = ImageBytesRetention.standard,
@@ -942,6 +1084,10 @@ abstract final class ImageBytesCache {
 
   /// Closes the previous shared instance, then clears [configure] and
   /// [debugShared], and resets diagnostics to silent.
+  ///
+  /// Also invokes any registered ladder cleanup (see
+  /// [ImageBytesCache.afterResetShared]) so resolver shared wiring can clear
+  /// without this facade importing the resolver library.
   @visibleForTesting
   static Future<void> resetShared() async {
     final previous = _shared;
@@ -949,5 +1095,13 @@ abstract final class ImageBytesCache {
     ImageBytesDiagnostics.current = const ImageBytesDiagnostics.silent();
     await previous?.close();
     _shared = null;
+    afterResetShared?.call();
   }
+
+  /// Optional cleanup after [resetShared] (resolver memo / debug override).
+  ///
+  /// Set by the resolver library so the store facade does not import the
+  /// ladder above it. Package-internal.
+  @internal
+  static void Function()? afterResetShared;
 }

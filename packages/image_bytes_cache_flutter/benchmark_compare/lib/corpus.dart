@@ -8,10 +8,10 @@ library;
 
 import 'dart:typed_data';
 
-/// Below the 64 KiB transferable / OPFS cut (chrome-sized SVG-ish).
+/// Below the 64 KiB transferable / OPFS cut.
 const int smallBytes = 4 * 1024;
 
-/// At or above the 64 KiB cut (raster-sized).
+/// At or above the 64 KiB cut.
 const int largeBytes = 96 * 1024;
 
 /// Size classes exercised by the primary bytes tables.

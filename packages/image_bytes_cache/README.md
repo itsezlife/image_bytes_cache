@@ -3,10 +3,9 @@
 [![Dart](https://img.shields.io/badge/Dart-%230175C2.svg?style=flat&logo=dart&logoColor=white)](https://dart.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Caches remote image **bytes** (SVG, PNG, and other payloads) with an identity
-key, a RAM meta mirror after open, platform blob stores, and a resolve ladder:
-cache hit, then network with in-flight coalesce, then fire-and-forget
-write-through.
+Caches remote image **bytes** with an identity key, a RAM meta mirror after
+open, platform blob stores, and a resolve ladder: cache hit, then network with
+in-flight coalesce, then fire-and-forget write-through.
 
 ## Features
 
@@ -15,8 +14,10 @@ write-through.
 - **Resolve ladder.** Cache → pooled HTTP (coalesced in-flight) → unawaited
   write-through. Empty cached payloads count as a miss. A durable write failure
   never fails a successful network resolve.
-- **Stable identity.** `ImageCacheKey` from URL + canonical headers (lowercase
-  keys, sorted). Distinct URLs that share a basename do not collide on disk.
+- **Stable identity.** `ImageCacheKey` from the `Uri.base.resolve` canonical URL
+  + canonical headers (lowercase keys, sorted; length-prefixed fingerprint).
+  Distinct URLs that share a basename do not collide on disk. Explicit
+  `cacheKey` is a full-identity escape hatch.
 - **Hot-path reads.** After open, meta stays in a RAM mirror. Pure reads do not
   durable-commit and do not serialize against each other.
 - **Batched durable commits.** Write, evict, prune, TTL-delete, reclaim, and
@@ -29,7 +30,8 @@ write-through.
 - **Soft diagnostics.** `silent`, `developer`, or `onEvent`. Process-wide
   policy at open/configure. No product logger dependency.
 - **Degraded open.** Hard storage failure falls back to
-  `MemoryImageBytesCache` unless `throwOnOpenFailure: true`. A missing VM
+  `MemoryImageBytesCache` unless `throwOnOpenFailure: true`. Partial VM workers
+  / web handles are closed before degrade or rethrow. A missing VM
   `directory` still throws.
 
 ## Quick start
@@ -68,13 +70,12 @@ await ImageBytesCache.configure(
 ```dart
 final bytes = await ImageBytesResolver.shared().resolve(
   ImageBytesRequest(
-    url: 'https://cdn.example.com/logo.svg',
-    headers: const {'Accept': 'image/svg+xml'},
+    url: 'https://cdn.example.com/logo.png',
   ),
 );
 ```
 
-For Flutter paint (SVG today), use
+For Flutter paint, use
 [`image_bytes_cache_flutter`](../image_bytes_cache_flutter/) after the same
 `open` / `configure` call.
 
@@ -87,7 +88,7 @@ ImageBytesRequest
 ImageBytesResolver
    ├─ cache.read(key)     hit → return bytes
    ├─ empty payload       treat as miss
-   ├─ HttpBytesFetcher    pool + coalesce by URI + canonical headers
+   ├─ HttpBytesFetcher    pool + coalesce by ImageCacheKey identity
    └─ unawaited write     failure → diagnostics only
 ```
 
@@ -96,12 +97,13 @@ ImageBytesResolver
 | `ImageCacheKey` | Filename-safe identity; shared with HTTP coalesce |
 | `IImageBytesCache` | `read` / `write` / `evict` / `prune` / `close` |
 | `ImageBytesResolver` | Ladder above the store |
-| `HttpBytesFetcher` | GET only; default pool 6, timeout 15s after a slot |
+| `HttpBytesFetcher` | GET only; pool 6; timeout 15s after a slot (`AbortableRequest`); pool wait unbounded |
 | `ImageBytesDiagnostics` | Soft failures: write-through, index wipe, degraded open |
 
 Inject cache and fetcher in tests. Production code usually uses
-`ImageBytesResolver.shared()`, which reads `ImageBytesCache.shared()` and
-`HttpBytesFetcher.shared()`.
+`ImageBytesResolver.shared()`, which re-reads `ImageBytesCache.shared()` and
+`HttpBytesFetcher.shared()` on every resolve (not a one-shot snapshot at first
+call).
 
 ## Retention
 

@@ -10,6 +10,10 @@ import 'package:meta/meta.dart';
 ///
 /// Process-wide policy lives on [current], set by [ImageBytesCache.open] /
 /// [ImageBytesCache.configure].
+///
+/// Host [ImageBytesDiagnostics.onEvent] callbacks must not throw. If they do,
+/// [report] swallows the error so a soft-failure path (especially unawaited
+/// write-through catch) cannot become an unhandled async error in the zone.
 @immutable
 sealed class ImageBytesDiagnostics {
   const ImageBytesDiagnostics();
@@ -24,27 +28,39 @@ sealed class ImageBytesDiagnostics {
   const factory ImageBytesDiagnostics.developer() = ImageBytesDiagnosticsDeveloper;
 
   /// Host owns routing (print, logger, Crashlytics, …).
+  ///
+  /// The callback must not throw. Throws are caught inside [report] so soft
+  /// failure reporting cannot escalate into an unhandled async error.
   const factory ImageBytesDiagnostics.onEvent(
     void Function(ImageBytesLogEvent event) onEvent,
   ) = ImageBytesDiagnosticsOnEvent;
 
   /// Emits [event] according to this policy.
+  ///
+  /// Swallowing a throwing host callback is intentional: diagnostics are
+  /// best-effort. Without this, an unawaited write-through `.catchError` that
+  /// calls [report] would surface the host throw as a second unhandled async
+  /// error after the durable failure was already soft-failed.
   void report(ImageBytesLogEvent event) {
-    switch (this) {
-      case ImageBytesDiagnosticsSilent():
-        return;
-      case ImageBytesDiagnosticsDeveloper():
-        developer.log(
-          event.message,
-          name: 'image_bytes',
-          stackTrace: event.stackTrace,
-          level: switch (event.level) {
-            ImageBytesLogLevel.error => 1000,
-            ImageBytesLogLevel.warning => 900,
-          },
-        );
-      case ImageBytesDiagnosticsOnEvent(:final onEvent):
-        onEvent(event);
+    try {
+      switch (this) {
+        case ImageBytesDiagnosticsSilent():
+          return;
+        case ImageBytesDiagnosticsDeveloper():
+          developer.log(
+            event.message,
+            name: 'image_bytes',
+            stackTrace: event.stackTrace,
+            level: switch (event.level) {
+              ImageBytesLogLevel.error => 1000,
+              ImageBytesLogLevel.warning => 900,
+            },
+          );
+        case ImageBytesDiagnosticsOnEvent(:final onEvent):
+          onEvent(event);
+      }
+    } on Object {
+      // Host diagnostics must not escalate soft failures.
     }
   }
 }

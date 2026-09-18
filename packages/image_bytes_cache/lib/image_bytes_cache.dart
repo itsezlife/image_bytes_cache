@@ -1,4 +1,4 @@
-/// Durable remote image bytes for SVG and raster consumers.
+/// Durable remote image bytes for any image-format payload.
 ///
 /// Product: raw bytes with an identity key, not decoded bitmaps and not Flutter
 /// [ImageCache]. After open, meta lives in a RAM mirror; durable meta commits

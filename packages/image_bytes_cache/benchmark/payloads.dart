@@ -7,10 +7,10 @@ library;
 
 import 'dart:typed_data';
 
-/// Below the 64 KiB transferable / OPFS threshold (chrome-sized SVG-ish).
+/// Below the 64 KiB transferable / OPFS threshold.
 const int smallBytes = 4 * 1024;
 
-/// At or above the 64 KiB cut (raster-sized).
+/// At or above the 64 KiB cut.
 const int largeBytes = 96 * 1024;
 
 /// Builds a deterministic payload of [length] bytes.

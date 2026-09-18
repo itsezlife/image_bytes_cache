@@ -7,7 +7,7 @@ import 'package:web/web.dart' as web;
 
 /// Cache API half of the web blob store: Responses for small payloads.
 ///
-/// Owned by [ImageBytesBlobStore$Web$JS], which routes large bodies to OPFS.
+/// Owned by [ImageBytesBlobStore$Routed$JS], which routes large bodies to OPFS.
 /// Retention and timestamps stay on [ImageBytesIndex$Cache$JS]. This type owns
 /// one named Cache ([ImageBytesWebKeys.blobsCacheName]). Keys are synthetic
 /// absolute URLs from [ImageBytesWebKeys.blobUrl] so payloads never share
@@ -29,7 +29,7 @@ final class ImageBytesBlobStore$Cache$JS implements IImageBytesBlobStore {
   }
 
   @override
-  Future<Uint8List?> read(ImageCacheKey key) async {
+  Future<Uint8List?> read(ImageCacheKey key, {int? knownByteLength}) async {
     final cache = _ensureOpen();
     final match = await cache.match(ImageBytesWebKeys.blobUrl(key).toJS).toDart;
     return switch (match) {
