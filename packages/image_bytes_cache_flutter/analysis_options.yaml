@@ -3,5 +3,13 @@
 # Include keeps drift low with `image_bytes_cache`. Flutter widget / DCM rules
 # stay out of the shared file; this package adds `flutter_test` via pubspec
 # only. Formatter page_width remains 120 via the included config.
+#
+# Nested `benchmark_compare/` is its own Flutter package (own pubspec). Exclude
+# it from this package's analysis so `flutter analyze` / IDE analysis of the
+# adapters does not walk competitor deps under the parent package config.
 
 include: ../image_bytes_cache/analysis_options.yaml
+
+analyzer:
+  exclude:
+    - benchmark_compare/**
