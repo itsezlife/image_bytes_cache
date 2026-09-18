@@ -200,10 +200,12 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
       final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
       if (!key._hasDecodeSize) {
         // Leave getTargetSize unset so external ResizeImage wrapping works.
-        return decode(buffer);
+        // Await so decode failures enter catch (evict) instead of escaping the
+        // try as an unawaited Future.
+        return await decode(buffer);
       }
 
-      return decode(
+      return await decode(
         buffer,
         getTargetSize: (intrinsicWidth, intrinsicHeight) {
           // ResizeImagePolicy.exact: host dims as targets, clamp unless
