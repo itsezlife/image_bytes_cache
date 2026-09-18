@@ -13,7 +13,7 @@ import 'package:path/path.dart' as p;
 /// Retention and timestamps stay on [ImageBytesIndex$File$VM]. This type owns the
 /// files under [directory] and the isolate that touches them.
 ///
-/// Without a long-lived [IsolateController], each small SVG write would pay
+/// Without a long-lived [IsolateController], each small payload write would pay
 /// `compute` spawn cost, and sync `dart:io` on the UI isolate would hitch
 /// scrolls. The worker runs sync IO; the host only awaits RPC.
 ///
@@ -39,8 +39,8 @@ final class ImageBytesBlobStore$File$VM implements IImageBytesBlobStore {
   /// Payloads at or above this size use [TransferableTypedData] on write RPC.
   ///
   /// Below the threshold, transferable prep is usually more expensive than a
-  /// normal isolate copy of a small SVG. Above it, avoiding a second full copy
-  /// on send matters for raster bodies.
+  /// normal isolate copy of a small body. Above it, avoiding a second full copy
+  /// on send matters for large rasters and other heavy payloads.
   static const int transferByteThreshold = 64 * 1024;
 
   /// Cache root shared with [ImageBytesIndex$File$VM].

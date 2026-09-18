@@ -46,9 +46,9 @@ typedef IsolateHandler<Payload, In, Out> =
 ///
 /// ## Why this shape
 ///
-/// VM durable blob IO needs a long-lived worker so small SVG writes do not pay
-/// per-op spawn cost and sync `dart:io` stays off the UI isolate. Do not
-/// invent a second request/response protocol for that path — reuse this
+/// VM durable blob IO needs a long-lived worker so small payload writes do not
+/// pay per-op spawn cost and sync `dart:io` stays off the UI isolate. Do not
+/// invent a second request/response protocol for that path. Reuse this
 /// spawn / add / stream / close contract.
 final class IsolateController<In, Out> {
   IsolateController._({

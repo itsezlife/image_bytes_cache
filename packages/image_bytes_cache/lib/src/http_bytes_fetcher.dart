@@ -8,12 +8,13 @@ import 'package:pool/pool.dart';
 
 /// HTTP GET for response bodies, with a concurrency cap and in-flight coalescing.
 ///
-/// Fetches bytes only. Callers own disk cache and decoding.
+/// Fetches bytes only. Callers own disk cache and decoding. Format is irrelevant
+/// here: SVG, PNG, WebP, or anything else the ladder later paints or decodes.
 ///
-/// A list of remote SVGs can open dozens of sockets without [Pool]. Two widgets
-/// that share the same [ImageCacheKey] identity (canonical URL + canonical
-/// headers) while the first GET is still open would hit the network twice
-/// without coalescing. Coalesce keys are [ImageCacheKey.value], not a
+/// A feed of remote images can open dozens of sockets without [Pool]. Two
+/// callers that share the same [ImageCacheKey] identity (canonical URL +
+/// canonical headers) while the first GET is still open would hit the network
+/// twice without coalescing. Coalesce keys are [ImageCacheKey.value], not a
 /// `url|headers` string join.
 ///
 /// Pass an [http.Client] when you already have one. If omitted, this class
@@ -21,10 +22,10 @@ import 'package:pool/pool.dart';
 ///
 /// ## Timeout and pool wait
 ///
-/// [timeout] bounds work **after** a [Pool] slot is acquired. Waiting for a
-/// slot is intentionally unbounded: under sustained overload callers queue
-/// rather than fail with a second timeout class. Prefer raising
-/// [maxConcurrent] or fixing upstream concurrency if queue wait dominates.
+/// [timeout] bounds work after a [Pool] slot is acquired. Waiting for a slot
+/// is intentionally unbounded: under sustained overload callers queue rather
+/// than fail with a second timeout class. Prefer raising [maxConcurrent] or
+/// fixing upstream concurrency if queue wait dominates.
 ///
 /// Once a slot is held, the GET uses [http.AbortableRequest] so clients that
 /// honor [http.Abortable.abortTrigger] (VM [http.IOClient], browser client)
@@ -33,7 +34,7 @@ import 'package:pool/pool.dart';
 /// in-flight work is then a property of that client, not of this pool.
 final class HttpBytesFetcher {
   /// [maxConcurrent] caps parallel GETs (default 6). Further callers wait in
-  /// [Pool] until a slot frees — that wait is **not** covered by [timeout].
+  /// [Pool] until a slot frees. That wait is not covered by [timeout].
   ///
   /// [timeout] starts after a pool slot is acquired and aborts the GET via
   /// [http.AbortableRequest] when the client supports abortion.

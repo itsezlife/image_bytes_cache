@@ -25,9 +25,9 @@ final class ImageBytesBlobStore$Routed$JS implements IImageBytesBlobStore {
 
   /// Payloads at or above this size are stored in OPFS; smaller ones in Cache API.
   ///
-  /// Matches the VM transferable write threshold so "small SVG vs large raster"
-  /// is one documented cut across platforms. Below it, Cache API is enough and
-  /// avoids OPFS open/write ceremony for chrome assets.
+  /// Matches the VM transferable write threshold so small vs large bodies use
+  /// one documented cut across platforms. Below it, Cache API is enough and
+  /// avoids OPFS open/write ceremony for typical chrome-sized assets.
   static const int opfsByteThreshold = 64 * 1024;
 
   final ImageBytesBlobStore$Cache$JS _cache;

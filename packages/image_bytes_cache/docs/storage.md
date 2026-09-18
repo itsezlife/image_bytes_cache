@@ -166,8 +166,8 @@ No per-write `compute`.
 | Blobs at or above 64 KiB | OPFS files under `opfsBlobsDirectoryName`                        |
 
 `ImageBytesBlobStore$Routed$JS.opfsByteThreshold` is 64 KiB, matching the VM
-transferable cut so “small chrome vs large raster” is one documented size
-policy. Writes route by length and delete the key from the other backend so a
+transferable cut so small and large bodies share one documented size policy.
+Writes route by length and delete the key from the other backend so a
 resize across the threshold cannot leave a stale twin. Reads check Cache then
 OPFS.
 
