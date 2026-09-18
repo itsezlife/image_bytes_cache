@@ -1,3 +1,12 @@
+## Unreleased
+
+- **ADDED**: Optional honest bytes-progress reporting on the resolve ladder.
+  `ImageBytesRequest.onBytesProgress` / `HttpBytesFetcher.getBytes(onBytesProgress:)`
+  report cumulative bytes (and total when Content-Length is known) while the
+  HTTP body is read on a network miss. Durable cache hits do not synthesize
+  mid-download progress. Resolve stays a single `Future<Uint8List>` — no public
+  streaming resolve API; coalesce and `ImageCacheKey` identity are unchanged.
+
 ## 0.0.2
 
 - **FIXED**: Web large-body hot reads skip a guaranteed Cache API miss when

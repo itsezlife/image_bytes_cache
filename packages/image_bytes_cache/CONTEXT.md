@@ -70,15 +70,23 @@ Resolve ladder: cache read → network on miss → fire-and-forget write-through
 Empty cached payloads count as a miss. Empty durable writes are not retained
 (evict). Write-through failures do not fail paint; throwing diagnostics
 `onEvent` is swallowed so it cannot become an unhandled async error.
-_Avoid_: failing resolve when durable write fails; sticky empty capacity waste
+Resolve remains a single [Future] of the full body — not a public byte stream.
+Optional bytes-progress reporting (cumulative / optional total) may ride with
+the request so paint adapters can surface honest download progress; cache hits
+do not invent mid-flight percents.
+_Avoid_: failing resolve when durable write fails; sticky empty capacity waste;
+replacing resolve with a streaming public API for progress alone; fake
+progress events that are not tied to real fetch bytes
 
 **HttpBytesFetcher**:
 HTTP GET with concurrency pool and in-flight coalesce by `ImageCacheKey` identity
 (canonical URL + canonical headers). Timeout after pool slot via
 `AbortableRequest` (aborts when the client honors it). Pool wait for a slot is
-intentionally unbounded.
+intentionally unbounded. When a progress sink is supplied, reports cumulative
+bytes as the response body is read (total when the response provides it).
 _Avoid_: homemade download queues; Mutex for N-way downloads; `url|headers`
-string joins for coalesce; assuming timeout covers pool queue time
+string joins for coalesce; assuming timeout covers pool queue time; synthetic
+chunk percents after the body is already fully buffered
 
 **ImageBytesDiagnostics**:
 Soft-failure policy (silent / developer log / onEvent). Process-wide `current`

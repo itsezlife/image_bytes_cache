@@ -1,3 +1,12 @@
+## Unreleased
+
+- **CHANGED**: Glossary and agent orientation now describe the planned raster
+  paint surface (`CachedNetworkBytesImageProvider` /
+  `CachedNetworkBytesImage`): ImageProvider-first decode, optional sized
+  Flutter `ImageCache` identity, no PageStorage body mirror, and progress via
+  core `onBytesProgress` — SVG remains a separate adapter. Implementation of
+  those types follows in this foundation train.
+
 ## 0.0.2
 
 - **FIXED**: `CachedNetworkSvgImage` forwards SVG parse/paint failures through

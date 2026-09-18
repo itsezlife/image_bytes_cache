@@ -84,6 +84,40 @@ void main() {
       expect(hits, 1);
     });
 
+    test('coalesce identity unchanged when starter supplies onBytesProgress', () async {
+      var hits = 0;
+      final release = Completer<void>();
+      final reports = <(int cumulative, int? total)>[];
+      final fetcher = HttpBytesFetcher(
+        client: _GatedChunkedBodyClient(
+          release: release,
+          onSend: () => hits++,
+          chunks: [
+            [1, 2],
+          ],
+          contentLength: 2,
+        ),
+      );
+      addTearDown(fetcher.close);
+
+      final url = Uri.parse('https://cdn.example.com/coalesce-progress.svg');
+      final a = fetcher.getBytes(
+        url,
+        onBytesProgress: (cumulative, total) => reports.add((cumulative, total)),
+      );
+      final b = fetcher.getBytes(
+        url,
+        onBytesProgress: (_, __) => fail('joiner sink must not run'),
+      );
+      release.complete();
+
+      final results = await (a, b).wait;
+      expect(results.$1, Uint8List.fromList([1, 2]));
+      expect(results.$2, Uint8List.fromList([1, 2]));
+      expect(hits, 1);
+      expect(reports, [(2, 2)]);
+    });
+
     test('does not coalesce when headers differ', () async {
       var hits = 0;
       final fetcher = HttpBytesFetcher(
@@ -209,7 +243,113 @@ void main() {
         throwsA(isA<StateError>()),
       );
     });
+
+    test('reports cumulative bytes and total while reading the body', () async {
+      final chunks = <List<int>>[
+        [1, 2],
+        [3, 4, 5],
+      ];
+      final reports = <(int cumulative, int? total)>[];
+      final fetcher = HttpBytesFetcher(
+        client: _ChunkedBodyClient(
+          chunks: chunks,
+          contentLength: 5,
+        ),
+      );
+      addTearDown(fetcher.close);
+
+      final bytes = await fetcher.getBytes(
+        Uri.parse('https://cdn.example.com/progress.svg'),
+        onBytesProgress: (cumulative, total) => reports.add((cumulative, total)),
+      );
+
+      expect(bytes, Uint8List.fromList([1, 2, 3, 4, 5]));
+      expect(reports, [(2, 5), (5, 5)]);
+    });
+
+    test('reports null total when Content-Length is unknown', () async {
+      final reports = <(int cumulative, int? total)>[];
+      final fetcher = HttpBytesFetcher(
+        client: _ChunkedBodyClient(
+          chunks: [
+            [9, 9],
+          ],
+        ),
+      );
+      addTearDown(fetcher.close);
+
+      await fetcher.getBytes(
+        Uri.parse('https://cdn.example.com/no-length.svg'),
+        onBytesProgress: (cumulative, total) => reports.add((cumulative, total)),
+      );
+
+      expect(reports, [(2, null)]);
+    });
+
+    test('does not invent progress when onBytesProgress is omitted', () async {
+      final fetcher = HttpBytesFetcher(
+        client: MockClient(
+          (_) async => http.Response.bytes(Uint8List.fromList([1, 2, 3]), 200),
+        ),
+      );
+      addTearDown(fetcher.close);
+
+      final bytes = await fetcher.getBytes(
+        Uri.parse('https://cdn.example.com/no-sink.svg'),
+      );
+
+      expect(bytes, Uint8List.fromList([1, 2, 3]));
+    });
   });
+}
+
+/// Streams response body chunks so progress can be observed mid-read.
+final class _ChunkedBodyClient extends http.BaseClient {
+  _ChunkedBodyClient({
+    required this.chunks,
+    this.contentLength,
+  });
+
+  final List<List<int>> chunks;
+  final int? contentLength;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    return http.StreamedResponse(
+      Stream.fromIterable(chunks),
+      200,
+      contentLength: contentLength,
+      request: request,
+    );
+  }
+}
+
+/// Like [_ChunkedBodyClient], but waits on [release] before streaming so two
+/// callers can join the same in-flight GET.
+final class _GatedChunkedBodyClient extends http.BaseClient {
+  _GatedChunkedBodyClient({
+    required this.release,
+    required this.onSend,
+    required this.chunks,
+    this.contentLength,
+  });
+
+  final Completer<void> release;
+  final void Function() onSend;
+  final List<List<int>> chunks;
+  final int? contentLength;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    onSend();
+    await release.future;
+    return http.StreamedResponse(
+      Stream.fromIterable(chunks),
+      200,
+      contentLength: contentLength,
+      request: request,
+    );
+  }
 }
 
 /// Test client that aborts when [http.Abortable.abortTrigger] completes.

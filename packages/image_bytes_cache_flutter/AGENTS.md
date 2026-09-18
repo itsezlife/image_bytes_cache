@@ -7,9 +7,10 @@ High-signal orientation for LLMs/agents working in
 
 ## Owns
 
-- Flutter widgets that paint resolved image **bytes** (including
-  `CachedNetworkSvgImage`).
-- Widget tests for those adapters.
+- Flutter paint adapters for resolved image **bytes**: raster
+  `CachedNetworkBytesImageProvider` / `CachedNetworkBytesImage`, and SVG
+  `CachedNetworkSvgImage`.
+- Widget / provider tests for those adapters.
 - UI/profile benches and flutter-side `benchmark_compare` (head-to-head bytes
   tables when fair, profile feed, scroll-pressure matrix) under
   [`benchmark_compare/`](benchmark_compare/) in this package — never under
@@ -35,12 +36,13 @@ files, sockets, or durable stores from widgets.
 1. **Depend on core contracts only** (`IImageBytesResolver`, `ImageCacheKey`,
    request types). Do not reimplement ladder, coalesce, or blob IO here.
 2. **Soft paint failures stay widget-local** (`onError` / `errorBuilder` for
-   resolve **and** SVG decode/paint — never endless placeholder alone). No
-   product logger inside paint adapters.
+   SVG resolve **and** SVG decode/paint; raster uses `Image.errorBuilder` /
+   optional `onError` — never endless placeholder alone). No product logger
+   inside paint adapters.
 3. **PageStorage identity** aligns with `ImageCacheKey` when a short-lived
-   copy is kept for scroll restore; keep it bounded / opt-out
+   copy is kept for **SVG** scroll restore; keep it bounded / opt-out
    (`pageStorageMaxBytes` / `persistInPageStorage`), never a second durable
-   store.
+   store. Raster adapters do **not** mirror bodies into PageStorage.
 4. **No dual implementations** in host design-system packages — migrate or
    re-export; do not keep a second resolve/paint tree beside this package.
 5. **Profile / compare harnesses** that need a Flutter binding live in this

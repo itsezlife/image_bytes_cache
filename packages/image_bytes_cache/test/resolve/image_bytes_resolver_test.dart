@@ -59,6 +59,63 @@ void main() {
       expect(hits, 0);
     });
 
+    test('network miss forwards onBytesProgress from the request', () async {
+      final reports = <(int cumulative, int? total)>[];
+      final fetcher = HttpBytesFetcher(
+        client: _ResolverChunkedBodyClient(
+          chunks: [
+            [1, 2, 3],
+            [4],
+          ],
+          contentLength: 4,
+        ),
+      );
+      addTearDown(fetcher.close);
+
+      final resolver = ImageBytesResolver(
+        cache: MemoryImageBytesCache(),
+        fetcher: fetcher,
+      );
+
+      final bytes = await resolver.resolve(
+        ImageBytesRequest(
+          url: 'https://cdn.example.com/progress.svg',
+          onBytesProgress: (cumulative, total) => reports.add((cumulative, total)),
+        ),
+      );
+
+      expect(bytes, Uint8List.fromList([1, 2, 3, 4]));
+      expect(reports, [(3, 4), (4, 4)]);
+    });
+
+    test('durable cache hit does not synthesize mid-download progress', () async {
+      var hits = 0;
+      final reports = <(int cumulative, int? total)>[];
+      final fetcher = HttpBytesFetcher(
+        client: MockClient((_) async {
+          hits++;
+          return http.Response.bytes(Uint8List.fromList([1]), 200);
+        }),
+      );
+      addTearDown(fetcher.close);
+
+      final cache = MemoryImageBytesCache();
+      const url = 'https://cdn.example.com/warm.svg';
+      await cache.write(ImageCacheKey.fromUrl(url), Uint8List.fromList([9, 9]));
+
+      final resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+      final bytes = await resolver.resolve(
+        ImageBytesRequest(
+          url: url,
+          onBytesProgress: (cumulative, total) => reports.add((cumulative, total)),
+        ),
+      );
+
+      expect(bytes, Uint8List.fromList([9, 9]));
+      expect(hits, 0);
+      expect(reports, isEmpty);
+    });
+
     test('empty cached payload counts as miss and fetches network', () async {
       var hits = 0;
       final body = Uint8List.fromList([8, 8]);
@@ -483,5 +540,26 @@ final class _MapBlobStore implements IImageBytesBlobStore {
   @override
   Future<void> delete(ImageCacheKey key) async {
     store.remove(key.value);
+  }
+}
+
+/// Streams body chunks so resolver progress forwarding can be observed.
+final class _ResolverChunkedBodyClient extends http.BaseClient {
+  _ResolverChunkedBodyClient({
+    required this.chunks,
+    this.contentLength,
+  });
+
+  final List<List<int>> chunks;
+  final int? contentLength;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    return http.StreamedResponse(
+      Stream.fromIterable(chunks),
+      200,
+      contentLength: contentLength,
+      request: request,
+    );
   }
 }
