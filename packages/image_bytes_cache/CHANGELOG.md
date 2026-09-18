@@ -1,5 +1,11 @@
 ## 0.0.2
 
+- **FIXED**: Ladder soft-failure hygiene — empty durable writes are not retained
+  (treated as eviction); sticky empty rows scrub on read; non-positive
+  `maxEntries` / `maxBytes` assert; throwing diagnostics `onEvent` is swallowed
+  so write-through catch cannot become an unhandled async error; HTTP timeout
+  uses `AbortableRequest` (releases sockets when the client honors abort) while
+  pool-wait before a slot remains intentionally unbounded.
 - **FIXED**: Ladder identity — coalesce uses `ImageCacheKey` (no ambiguous
   `url|headers` join); `fromUrl` fingerprints `Uri.base.resolve` canonical URLs
   with length-prefixed material; explicit `cacheKey` documented as full identity

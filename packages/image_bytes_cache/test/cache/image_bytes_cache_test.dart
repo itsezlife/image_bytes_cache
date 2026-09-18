@@ -98,6 +98,30 @@ void main() {
 
       expect(await cache.read(key), isNull);
     });
+
+    test('empty write is not retained as capacity waste', () async {
+      final cache = MemoryImageBytesCache(
+        retention: const ImageBytesRetention.maxEntries(1),
+      );
+      const emptyKey = ImageCacheKey('empty');
+      const keepKey = ImageCacheKey('keep');
+
+      await cache.write(emptyKey, Uint8List(0));
+      expect(await cache.read(emptyKey), isNull);
+
+      await cache.write(keepKey, Uint8List.fromList([1]));
+      expect(await cache.read(keepKey), Uint8List.fromList([1]));
+    });
+
+    test('empty write evicts a previously stored payload for the same key', () async {
+      final cache = MemoryImageBytesCache();
+      const key = ImageCacheKey('logo');
+      await cache.write(key, Uint8List.fromList([1, 2]));
+
+      await cache.write(key, Uint8List(0));
+
+      expect(await cache.read(key), isNull);
+    });
   });
 
   group('NoOpImageBytesCache', () {
@@ -233,6 +257,38 @@ void main() {
       expect(limits.maxAge, const Duration(days: 14));
       expect(limits.maxEntries, 500);
       expect(limits.maxBytes, 50 * 1024 * 1024);
+    });
+  });
+
+  group('ImageBytesRetention capacity invariants', () {
+    test('rejects non-positive maxEntries', () {
+      expect(
+        () => ImageBytesRetention.maxEntries(0),
+        throwsA(isA<AssertionError>()),
+      );
+      expect(
+        () => ImageBytesRetention.maxEntries(-1),
+        throwsA(isA<AssertionError>()),
+      );
+      expect(
+        () => ImageBytesRetention.compound(maxEntries: 0),
+        throwsA(isA<AssertionError>()),
+      );
+    });
+
+    test('rejects non-positive maxBytes', () {
+      expect(
+        () => ImageBytesRetention.maxBytes(0),
+        throwsA(isA<AssertionError>()),
+      );
+      expect(
+        () => ImageBytesRetention.maxBytes(-1),
+        throwsA(isA<AssertionError>()),
+      );
+      expect(
+        () => ImageBytesRetention.compound(maxBytes: 0),
+        throwsA(isA<AssertionError>()),
+      );
     });
   });
 

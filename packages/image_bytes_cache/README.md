@@ -99,7 +99,7 @@ ImageBytesResolver
 | `ImageCacheKey` | Filename-safe identity; shared with HTTP coalesce |
 | `IImageBytesCache` | `read` / `write` / `evict` / `prune` / `close` |
 | `ImageBytesResolver` | Ladder above the store |
-| `HttpBytesFetcher` | GET only; default pool 6, timeout 15s after a slot |
+| `HttpBytesFetcher` | GET only; pool 6; timeout 15s after a slot (`AbortableRequest`); pool wait unbounded |
 | `ImageBytesDiagnostics` | Soft failures: write-through, index wipe, degraded open |
 
 Inject cache and fetcher in tests. Production code usually uses

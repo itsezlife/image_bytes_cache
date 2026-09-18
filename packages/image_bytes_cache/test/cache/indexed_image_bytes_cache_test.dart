@@ -33,6 +33,52 @@ void main() {
       expect(index.records[key.value]?.byteLength, 4);
     });
 
+    test('empty write is not retained as capacity waste', () async {
+      cache = IndexedImageBytesCache(
+        index: index,
+        blobs: blobs,
+        retention: const ImageBytesRetention.maxEntries(1),
+        clock: () => now,
+      );
+      const emptyKey = ImageCacheKey('empty');
+      const keepKey = ImageCacheKey('keep');
+
+      await cache.write(emptyKey, Uint8List(0));
+      expect(await cache.read(emptyKey), isNull);
+      expect(blobs.store.containsKey(emptyKey.value), isFalse);
+      expect(index.records.containsKey(emptyKey.value), isFalse);
+
+      await cache.write(keepKey, Uint8List.fromList([1]));
+      expect(await cache.read(keepKey), Uint8List.fromList([1]));
+    });
+
+    test('empty write evicts a previously stored payload for the same key', () async {
+      const key = ImageCacheKey('logo');
+      await cache.write(key, Uint8List.fromList([1, 2]));
+
+      await cache.write(key, Uint8List(0));
+
+      expect(await cache.read(key), isNull);
+      expect(blobs.store.containsKey(key.value), isFalse);
+      expect(index.records.containsKey(key.value), isFalse);
+    });
+
+    test('read of sticky empty payload misses and scrubs the entry', () async {
+      const key = ImageCacheKey('sticky');
+      // Simulate a legacy empty durable row that predates empty-write rejection.
+      blobs.store[key.value] = Uint8List(0);
+      index.records[key.value] = ImageBytesRecord(
+        key: key,
+        writtenAt: now,
+        accessedAt: now,
+        byteLength: 0,
+      );
+
+      expect(await cache.read(key), isNull);
+      expect(blobs.store.containsKey(key.value), isFalse);
+      expect(index.records.containsKey(key.value), isFalse);
+    });
+
     test('read does not persist access to the index (soft LRU)', () async {
       const key = ImageCacheKey('logo');
       await cache.write(key, Uint8List.fromList([1]));

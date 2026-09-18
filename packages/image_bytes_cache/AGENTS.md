@@ -84,8 +84,10 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
 - **64 KiB cut:** VM transferable isolate writes and web OPFS vs Cache API use
   the same threshold. Do not collapse to all-OPFS or all-Cache without updating
   docs and tests.
-- **Empty cached payload = miss** in the resolver; write-through failure never
-  fails a successful network resolve (diagnostics only).
+- **Empty cached payload = miss** in the resolver; empty durable writes are
+  not retained (evict); sticky empty rows scrub on read; write-through failure
+  never fails a successful network resolve (diagnostics only; throwing
+  `onEvent` is swallowed).
 - **Open:** hard storage failure degrades to `MemoryImageBytesCache` unless
   `throwOnOpenFailure`; partial VM worker / web handles are closed before
   degrade or rethrow. Missing VM `directory` still throws. `configure`
@@ -93,7 +95,8 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
   re-reads process-wide cache/fetcher on each resolve (no one-shot snapshot).
   `resetShared` also clears resolver shared wiring.
 - **Retention:** TTL on read; capacity on write/prune; no background timer.
-  `standard` = 14 days / 500 entries / 50 MiB.
+  `standard` = 14 days / 500 entries / 50 MiB. Non-positive `maxEntries` /
+  `maxBytes` assert.
 
 ## Gotchas quick-reference
 
@@ -108,7 +111,8 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
   Indexed and durable wrappers throw after close.
 - Web payload Cache keys are synthetic `https://image-bytes.invalid/...`, not
   the real fetch URL.
-- `HttpBytesFetcher` timeout does not cover pool wait time.
+- `HttpBytesFetcher` timeout does not cover pool wait time (intentionally
+  unbounded queue); timeout uses `AbortableRequest` after a slot is acquired.
 - Chrome open test is the honesty check for Cache/OPFS; do not merge web blob
   changes on green VM tests alone.
 

@@ -172,6 +172,30 @@ void main() {
       );
     });
 
+    test('timeout aborts AbortableRequest when the client honors abortTrigger', () async {
+      var sawAbortable = false;
+      var abortCompleted = false;
+      final fetcher = HttpBytesFetcher(
+        timeout: const Duration(milliseconds: 30),
+        client: _AbortHonoringClient(
+          onRequest: (request) {
+            if (request case http.Abortable(:final abortTrigger?)) {
+              sawAbortable = true;
+              unawaited(abortTrigger.whenComplete(() => abortCompleted = true));
+            }
+          },
+        ),
+      );
+      addTearDown(fetcher.close);
+
+      await expectLater(
+        fetcher.getBytes(Uri.parse('https://cdn.example.com/abort.svg')),
+        throwsA(isA<TimeoutException>()),
+      );
+      expect(sawAbortable, isTrue);
+      expect(abortCompleted, isTrue);
+    });
+
     test('rejects getBytes after close', () async {
       final fetcher = HttpBytesFetcher(
         client: MockClient(
@@ -186,4 +210,21 @@ void main() {
       );
     });
   });
+}
+
+/// Test client that aborts when [http.Abortable.abortTrigger] completes.
+final class _AbortHonoringClient extends http.BaseClient {
+  _AbortHonoringClient({required this.onRequest});
+
+  final void Function(http.BaseRequest request) onRequest;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    onRequest(request);
+    if (request case http.Abortable(:final abortTrigger?)) {
+      await abortTrigger;
+      throw http.RequestAbortedException(request.url);
+    }
+    throw StateError('expected AbortableRequest with abortTrigger');
+  }
 }

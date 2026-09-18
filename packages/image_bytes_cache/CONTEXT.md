@@ -55,24 +55,32 @@ on web; importing `package:shared` for the isolate helper
 **ImageBytesRetention**:
 Sealed eviction policy. TTL checked on read; capacity trimmed on write/prune.
 No background timer. Default `standard` caps age, entry count, and total bytes.
-_Avoid_: background eviction timers; entry-count-only budgets for large rasters
+Non-positive `maxEntries` / `maxBytes` are asserted invalid.
+_Avoid_: background eviction timers; entry-count-only budgets for large rasters;
+zero or negative capacity caps
 
 **ImageBytesResolver** / **ImageBytesRequest**:
 Resolve ladder: cache read → network on miss → fire-and-forget write-through.
-Empty cached payloads count as a miss. Write-through failures do not fail paint.
-_Avoid_: failing resolve when durable write fails
+Empty cached payloads count as a miss. Empty durable writes are not retained
+(evict). Write-through failures do not fail paint; throwing diagnostics
+`onEvent` is swallowed so it cannot become an unhandled async error.
+_Avoid_: failing resolve when durable write fails; sticky empty capacity waste
 
 **HttpBytesFetcher**:
 HTTP GET with concurrency pool and in-flight coalesce by `ImageCacheKey` identity
-(canonical URL + canonical headers).
+(canonical URL + canonical headers). Timeout after pool slot via
+`AbortableRequest` (aborts when the client honors it). Pool wait for a slot is
+intentionally unbounded.
 _Avoid_: homemade download queues; Mutex for N-way downloads; `url|headers`
-string joins for coalesce
+string joins for coalesce; assuming timeout covers pool queue time
 
 **ImageBytesDiagnostics**:
 Soft-failure policy (silent / developer log / onEvent). Process-wide `current`
 set by open/configure. Covers write-through, index wipe, and degraded open.
+`onEvent` must not throw; throws are swallowed in `report`.
 Package does not depend on a product logger.
-_Avoid_: `package:l` inside the ladder; `enableLogging` bool soup
+_Avoid_: `package:l` inside the ladder; `enableLogging` bool soup; throwing
+host callbacks that escalate soft failures
 
 **ImageBytesCache.open / configure / shared / resetShared**:
 Host wiring. VM `directory` must be under a reclaimable cache root. Web ignores

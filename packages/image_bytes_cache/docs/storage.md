@@ -85,7 +85,13 @@ Sealed `ImageBytesRetention`. TTL is checked on `read`. Capacity is trimmed on
 
 Entry count alone would let a few large assets fill the device. The byte
 budget bounds that without a timer. Hosts may pass `compound`, `maxAge`,
-`maxEntries`, `maxBytes`, or `unlimited`.
+`maxEntries`, `maxBytes`, or `unlimited`. When set, `maxEntries` and
+`maxBytes` must be **positive** (asserted on the retention constructors);
+non-positive caps are nonsense policy.
+
+Empty payloads are not retained on `write` (treated as eviction of that key).
+A sticky empty durable row still misses on `read` and is scrubbed so it cannot
+waste entry capacity.
 
 Capacity trim evicts least-recently-accessed records after soft access has
 been flushed, so a just-read entry is not wrongly dropped when writing a new

@@ -44,10 +44,14 @@ silently share one override across different Authorization values.
 
 1. `cache.read(key)`. Non-empty hit returns immediately.
 2. Empty cached payload counts as a **miss** (bad empty write must not poison
-   the ladder).
+   the ladder). Durable stores also refuse to retain empty writes (evict the
+   key instead) and scrub sticky empty rows on read so they cannot waste
+   `maxEntries` capacity.
 3. `HttpBytesFetcher.getBytes` on `Uri.base.resolve(url)` on miss.
 4. Return network bytes; schedule `cache.write` with `unawaited`. Write failure
    reports through `ImageBytesDiagnostics` and does **not** fail `resolve`.
+   A throwing host `onEvent` callback is swallowed inside `report` so the
+   unawaited catch path cannot become a second unhandled async error.
 
 Inject cache and fetcher in tests. Production paint usually uses
 `ImageBytesResolver.shared()`, which **re-reads** `ImageBytesCache.shared()`
@@ -64,13 +68,21 @@ GET bodies only. Callers own disk cache and decode.
 | Knob | Default | Notes |
 | --- | --- | --- |
 | `maxConcurrent` | 6 | Further callers wait in `Pool` |
-| `timeout` | 15s | Starts after a pool slot is acquired; wait for a slot is not timed |
+| `timeout` | 15s | Starts after a pool slot is acquired; wait for a slot is **intentionally unbounded** |
 
 Concurrent calls that share the same `ImageCacheKey` identity (canonical URL +
 canonical headers) share one in-flight `Future`. Non-2xx → `ClientException`.
-Empty body → `StateError`. After `close`, new `getBytes` calls throw; in-flight
-work may still finish or fail. If the fetcher created its own `http.Client`,
-`close` closes that client.
+Empty body → `StateError` (fail closed; no silent empty paint). After `close`,
+new `getBytes` calls throw; in-flight work may still finish or fail. If the
+fetcher created its own `http.Client`, `close` closes that client.
+
+Timeout uses `http.AbortableRequest`: clients that honor `abortTrigger`
+(`IOClient`, browser client) release the underlying connection when the
+deadline elapses. The waiter always sees `TimeoutException`. Clients that do
+not abort (for example `MockClient` in tests) still fail the waiter; any
+leftover in-flight work is then a property of that client. Pool wait before a
+slot is not timed — raise `maxConcurrent` or reduce host concurrency if queue
+latency dominates.
 
 ## Diagnostics
 
@@ -83,7 +95,7 @@ controls whether soft failures are audible. Default is `silent`. Process-wide
 | --- | --- |
 | `silent` | No emission |
 | `developer` | `developer.log` name `image_bytes` |
-| `onEvent` | Host callback (logger, Crashlytics, …) |
+| `onEvent` | Host callback (logger, Crashlytics, …). Must not throw; throws are swallowed inside `report` so soft-failure paths cannot escalate to unhandled async errors |
 
 Ops on `ImageBytesLogEvent`:
 

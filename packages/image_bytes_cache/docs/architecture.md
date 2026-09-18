@@ -66,10 +66,13 @@ handles before that surface. Missing VM `directory` still throws
 
 `ImageBytesRequest` → `ImageBytesResolver.resolve` →
 
-1. `cache.read(key)`. Hit returns bytes; empty payload counts as miss.
-2. On miss, `HttpBytesFetcher.getBytes` (pool + in-flight coalesce).
+1. `cache.read(key)`. Hit returns bytes; empty payload counts as miss (and
+   durable stores scrub sticky empty rows / refuse empty writes).
+2. On miss, `HttpBytesFetcher.getBytes` (pool + in-flight coalesce; timeout
+   after slot via `AbortableRequest`).
 3. Return network bytes immediately; `cache.write` runs unawaited. Write
-   failure reports diagnostics and does not fail the resolve future.
+   failure reports diagnostics and does not fail the resolve future (throwing
+   host `onEvent` is swallowed).
 
 `ImageBytesResolver.shared()` re-reads `ImageBytesCache.shared()` /
 `HttpBytesFetcher.shared()` on each resolve (not a one-shot snapshot).

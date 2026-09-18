@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
@@ -58,6 +59,25 @@ void main() {
       expect(hits, 0);
     });
 
+    test('empty cached payload counts as miss and fetches network', () async {
+      var hits = 0;
+      final body = Uint8List.fromList([8, 8]);
+      final fetcher = HttpBytesFetcher(
+        client: MockClient((_) async {
+          hits++;
+          return http.Response.bytes(body, 200);
+        }),
+      );
+      addTearDown(fetcher.close);
+
+      final cache = _StickyEmptyImageBytesCache();
+      const url = 'https://cdn.example.com/empty-cached.svg';
+      final resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
+      expect(hits, 1);
+    });
+
     test('write-through failure still returns network bytes and reports', () async {
       final body = Uint8List.fromList([1, 2, 3]);
       final fetcher = HttpBytesFetcher(
@@ -82,6 +102,44 @@ void main() {
       expect(events.single.op, ImageBytesLogOp.writeThrough);
       expect(events.single.level, ImageBytesLogLevel.error);
       expect(events.single.message, contains('write-through failed'));
+    });
+
+    test('throwing onEvent during write-through catch is not an unhandled async error', () async {
+      final body = Uint8List.fromList([4, 4, 4]);
+      final fetcher = HttpBytesFetcher(
+        client: MockClient((_) async => http.Response.bytes(body, 200)),
+      );
+      addTearDown(fetcher.close);
+
+      final errors = <Object>[];
+      await runZonedGuarded(
+        () async {
+          final resolver = ImageBytesResolver(
+            cache: const _ThrowingWriteImageBytesCache(),
+            fetcher: fetcher,
+            diagnostics: ImageBytesDiagnostics.onEvent((_) {
+              throw StateError('host diagnostics blew up');
+            }),
+          );
+
+          expect(
+            await resolver.resolve(
+              const ImageBytesRequest(url: 'https://cdn.example.com/diag-throw.svg'),
+            ),
+            body,
+          );
+          // Let the unawaited write-through catch + report run.
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        },
+        (error, _) => errors.add(error),
+      );
+
+      expect(
+        errors,
+        isEmpty,
+        reason: 'throwing onEvent must not escape as an unhandled async error',
+      );
     });
 
     test('silent diagnostics emits nothing on write-through failure', () async {
@@ -270,6 +328,24 @@ void main() {
       );
     });
   });
+}
+
+/// Always "hits" with an empty payload (legacy sticky empty durable row).
+final class _StickyEmptyImageBytesCache implements IImageBytesCache {
+  @override
+  Future<Uint8List?> read(ImageCacheKey key) async => Uint8List(0);
+
+  @override
+  Future<void> write(ImageCacheKey key, Uint8List bytes) async {}
+
+  @override
+  Future<void> evict(ImageCacheKey key) async {}
+
+  @override
+  Future<ImageBytesPruneReport> prune() async => const ImageBytesPruneReport(evictedKeys: [], freedBytes: 0);
+
+  @override
+  Future<void> close() async {}
 }
 
 /// Always misses; [write] always throws (simulates durable store failure).

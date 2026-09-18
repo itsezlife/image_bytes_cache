@@ -52,8 +52,8 @@ on this path).
 | `IImageBytesCache` / `IndexedImageBytesCache` | Hit/miss, soft LRU, TTL, capacity (entries + bytes), concurrent read vs exclusive mutate integrity, orphan healing, close |
 | `ImageBytesCache.open` (VM) | Real temp directory round-trip, batch commit after close/reopen, orphan reclaim, degraded open |
 | `ImageBytesCache.open` (web / Chrome) | Size routing, reopen, reclaim on Cache and OPFS |
-| `ImageBytesResolver` | Hit skips network; empty cache misses; write-through failure still returns bytes |
-| `HttpBytesFetcher` | Coalesce, pool, non-2xx, empty body, timeout, close |
+| `ImageBytesResolver` | Hit skips network; empty cache misses; write-through failure still returns bytes; throwing `onEvent` is not unhandled |
+| `HttpBytesFetcher` | Coalesce, pool, non-2xx, empty body, timeout (+ abort when client honors), close |
 | `ImageCacheKey` | Canonical headers; distinct URLs with same basename |
 
 Prefer fakes for `IImageBytesIndex` / `IImageBytesBlobStore` when testing the

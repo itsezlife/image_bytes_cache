@@ -137,14 +137,22 @@ sealed class ImageBytesRetention {
   const factory ImageBytesRetention.maxAge(Duration maxAge) = ImageBytesRetentionMaxAge;
 
   /// Keep at most [maxEntries] (LRU by last access).
+  ///
+  /// [maxEntries] must be positive — a zero or negative cap is nonsense
+  /// retention that would either retain nothing useful or never trim.
   const factory ImageBytesRetention.maxEntries(int maxEntries) = ImageBytesRetentionMaxEntries;
 
   /// Keep total payload size at or under [maxBytes] (LRU by last access).
+  ///
+  /// [maxBytes] must be positive — a non-positive byte budget cannot describe
+  /// a usable capacity policy.
   const factory ImageBytesRetention.maxBytes(int maxBytes) = ImageBytesRetentionMaxBytes;
 
   /// Combine optional TTL and capacity limits.
   ///
   /// Null fields are ignored. Use this when you need more than one constraint.
+  /// When set, [maxEntries] and [maxBytes] must be positive (same invariant as
+  /// the dedicated factories).
   const factory ImageBytesRetention.compound({
     Duration? maxAge,
     int? maxEntries,
@@ -214,7 +222,7 @@ final class ImageBytesRetentionMaxAge extends ImageBytesRetention {
 @immutable
 final class ImageBytesRetentionMaxEntries extends ImageBytesRetention {
   /// See [ImageBytesRetention.maxEntries].
-  const ImageBytesRetentionMaxEntries(this.maxEntries);
+  const ImageBytesRetentionMaxEntries(this.maxEntries) : assert(maxEntries > 0, 'maxEntries must be > 0');
 
   /// Maximum number of keys retained.
   final int maxEntries;
@@ -224,7 +232,7 @@ final class ImageBytesRetentionMaxEntries extends ImageBytesRetention {
 @immutable
 final class ImageBytesRetentionMaxBytes extends ImageBytesRetention {
   /// See [ImageBytesRetention.maxBytes].
-  const ImageBytesRetentionMaxBytes(this.maxBytes);
+  const ImageBytesRetentionMaxBytes(this.maxBytes) : assert(maxBytes > 0, 'maxBytes must be > 0');
 
   /// Maximum sum of [ImageBytesRecord.byteLength] across entries.
   final int maxBytes;
@@ -238,7 +246,8 @@ final class ImageBytesRetentionCompound extends ImageBytesRetention {
     this.maxAge,
     this.maxEntries,
     this.maxBytes,
-  });
+  }) : assert(maxEntries == null || maxEntries > 0, 'maxEntries must be > 0 when set'),
+       assert(maxBytes == null || maxBytes > 0, 'maxBytes must be > 0 when set');
 
   /// Optional TTL since write.
   final Duration? maxAge;
@@ -362,6 +371,11 @@ abstract interface class IImageBytesCache {
   Future<Uint8List?> read(ImageCacheKey key);
 
   /// Stores [bytes] under [key] and applies capacity retention.
+  ///
+  /// Empty [bytes] are not retained: the write is treated as eviction of [key]
+  /// when present. An empty durable row would still count toward
+  /// [ImageBytesRetention.maxEntries] while never painting, so hosts must not
+  /// be able to stick zero-length capacity waste through this API.
   Future<void> write(ImageCacheKey key, Uint8List bytes);
 
   /// Deletes one key if present (index and payload when composed).
@@ -468,6 +482,8 @@ final class IndexedImageBytesCache implements IImageBytesCache {
 
       final bytes = await _blobs.read(key);
       if (bytes == null) return const _ReadProbe.needsIndexDelete();
+      // Legacy / corrupt empty rows still count toward capacity; scrub as miss.
+      if (bytes.isEmpty) return const _ReadProbe.needsDelete();
 
       _pendingAccess[key] = now;
       return _ReadProbe.hit(bytes);
@@ -515,9 +531,9 @@ final class IndexedImageBytesCache implements IImageBytesCache {
   /// Blob hit after meta was already confirmed present and not expired.
   Future<Uint8List?> _finishSharedHit(ImageCacheKey key, DateTime now) async {
     final bytes = await _blobs.read(key);
-    if (bytes == null) {
+    if (bytes == null || bytes.isEmpty) {
       _pendingAccess.remove(key);
-      await _index.delete(key);
+      await _deleteBoth(key);
       await _index.commit();
       return null;
     }
@@ -526,23 +542,31 @@ final class IndexedImageBytesCache implements IImageBytesCache {
   }
 
   /// Writes payload + RAM meta, flushes soft access, trims, commits once.
+  ///
+  /// Empty [bytes] evict [key] instead of storing a zero-length row that would
+  /// still occupy an entry slot under capacity retention.
   @override
-  Future<void> write(ImageCacheKey key, Uint8List bytes) => _runExclusive(() async {
-    _ensureOpen();
-    await _flushPendingAccess();
-    final now = _clock();
-    await _blobs.write(key, bytes);
-    await _index.put(
-      ImageBytesRecord(
-        key: key,
-        writtenAt: now,
-        accessedAt: now,
-        byteLength: bytes.length,
-      ),
-    );
-    await _trimCapacity();
-    await _index.commit();
-  });
+  Future<void> write(ImageCacheKey key, Uint8List bytes) {
+    if (bytes.isEmpty) {
+      return evict(key);
+    }
+    return _runExclusive(() async {
+      _ensureOpen();
+      await _flushPendingAccess();
+      final now = _clock();
+      await _blobs.write(key, bytes);
+      await _index.put(
+        ImageBytesRecord(
+          key: key,
+          writtenAt: now,
+          accessedAt: now,
+          byteLength: bytes.length,
+        ),
+      );
+      await _trimCapacity();
+      await _index.commit();
+    });
+  }
 
   /// Removes index row, payload, and any pending access for [key].
   @override
@@ -761,12 +785,16 @@ final class MemoryImageBytesCache implements IImageBytesCache {
 
   final Map<ImageCacheKey, _MemoryEntry> _entries = {};
 
-  /// Returns bytes or `null` if missing / past TTL.
+  /// Returns bytes or `null` if missing / past TTL / empty sticky payload.
   @override
   Future<Uint8List?> read(ImageCacheKey key) async {
     if (_entries[key] case final entry?) {
       final now = _clock();
       if (retention.limits.maxAge case final maxAge? when now.difference(entry.writtenAt) > maxAge) {
+        _entries.remove(key);
+        return null;
+      }
+      if (entry.bytes.isEmpty) {
         _entries.remove(key);
         return null;
       }
@@ -778,8 +806,15 @@ final class MemoryImageBytesCache implements IImageBytesCache {
   }
 
   /// Stores [bytes] and trims capacity if needed.
+  ///
+  /// Empty [bytes] evict [key] instead of retaining a zero-length entry that
+  /// still consumes [ImageBytesRetention.maxEntries] capacity.
   @override
   Future<void> write(ImageCacheKey key, Uint8List bytes) async {
+    if (bytes.isEmpty) {
+      _entries.remove(key);
+      return;
+    }
     final now = _clock();
     _entries[key] = _MemoryEntry(
       bytes: bytes,
