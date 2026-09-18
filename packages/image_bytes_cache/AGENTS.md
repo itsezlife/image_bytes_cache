@@ -99,6 +99,9 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
 
 - Header key casing and map order must not change identity or coalesce keys
   (`ImageCacheKey.canonicalHeaders`).
+- Coalesce and durable identity use `ImageCacheKey` (length-prefixed fingerprint
+  material; no `url|headers` join). Relative vs absolute `Uri.base` equivalents
+  share one key; explicit `cacheKey` is full identity (headers on wire only).
 - Distinct URLs that share a basename must not collide on disk (fingerprint).
 - VM store under app **cache** root, not documents. Web ignores `directory`.
 - `MemoryImageBytesCache` / `NoOpImageBytesCache` stay usable after `close`;

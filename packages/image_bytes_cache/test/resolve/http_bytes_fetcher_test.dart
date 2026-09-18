@@ -103,6 +103,29 @@ void main() {
       expect(hits, 2);
     });
 
+    test('does not coalesce URL-with-|… into clean URL plus those headers', () async {
+      var hits = 0;
+      final release = Completer<void>();
+      final fetcher = HttpBytesFetcher(
+        client: MockClient((_) async {
+          hits++;
+          await release.future;
+          return http.Response.bytes(Uint8List.fromList([1]), 200);
+        }),
+      );
+      addTearDown(fetcher.close);
+
+      final poisoned = Uri.parse('https://cdn.example.com/a.svg|authorization=Bearer x');
+      final clean = Uri.parse('https://cdn.example.com/a.svg');
+
+      final a = fetcher.getBytes(poisoned);
+      final b = fetcher.getBytes(clean, headers: const {'Authorization': 'Bearer x'});
+      release.complete();
+
+      await (a, b).wait;
+      expect(hits, 2);
+    });
+
     test('limits concurrent GETs to maxConcurrent', () async {
       var inFlight = 0;
       var peak = 0;

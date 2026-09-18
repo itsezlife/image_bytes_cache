@@ -11,8 +11,10 @@ import 'package:pool/pool.dart';
 /// Fetches bytes only. Callers own disk cache and decoding.
 ///
 /// A list of remote SVGs can open dozens of sockets without [Pool]. Two widgets
-/// that request the same URI and headers while the first GET is still open
-/// would hit the network twice without coalescing.
+/// that share the same [ImageCacheKey] identity (canonical URL + canonical
+/// headers) while the first GET is still open would hit the network twice
+/// without coalescing. Coalesce keys are [ImageCacheKey.value], not a
+/// `url|headers` string join.
 ///
 /// Pass an [http.Client] when you already have one. If omitted, this class
 /// creates a client and closes it in [close].
@@ -53,8 +55,11 @@ final class HttpBytesFetcher {
 
   /// GETs [url] and returns the response body.
   ///
-  /// Concurrent calls with the same URI and header map share one in-flight
+  /// Concurrent calls that share the same [ImageCacheKey.fromUrl] identity
+  /// (canonical URL form of [url] + canonical headers) share one in-flight
   /// [Future]. Header keys compare case-insensitively; values stay as given.
+  /// Coalesce uses [ImageCacheKey.value], not a `url|headers` string join, so a
+  /// URL that embeds `|…` cannot merge with a clean URL plus those headers.
   ///
   /// Throws [http.ClientException] on non-2xx, [StateError] on an empty body,
   /// [TimeoutException] when [timeout] elapses, and [StateError] after [close].
@@ -66,7 +71,7 @@ final class HttpBytesFetcher {
       throw StateError('HttpBytesFetcher is closed');
     }
 
-    final key = _coalesceKey(url, headers);
+    final key = ImageCacheKey.fromUrl(url.toString(), headers: headers).value;
     final existing = _inFlight[key];
     if (existing != null) return existing;
 
@@ -114,13 +119,5 @@ final class HttpBytesFetcher {
     if (identical(_shared, this)) {
       _shared = null;
     }
-  }
-
-  static String _coalesceKey(Uri url, Map<String, String>? headers) {
-    final headerPart = ImageCacheKey.canonicalHeaders(headers);
-    if (headerPart.isEmpty) {
-      return url.toString();
-    }
-    return '$url|$headerPart';
   }
 }

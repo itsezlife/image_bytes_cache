@@ -15,8 +15,10 @@ write-through.
 - **Resolve ladder.** Cache → pooled HTTP (coalesced in-flight) → unawaited
   write-through. Empty cached payloads count as a miss. A durable write failure
   never fails a successful network resolve.
-- **Stable identity.** `ImageCacheKey` from URL + canonical headers (lowercase
-  keys, sorted). Distinct URLs that share a basename do not collide on disk.
+- **Stable identity.** `ImageCacheKey` from the `Uri.base.resolve` canonical URL
+  + canonical headers (lowercase keys, sorted; length-prefixed fingerprint).
+  Distinct URLs that share a basename do not collide on disk. Explicit
+  `cacheKey` is a full-identity escape hatch.
 - **Hot-path reads.** After open, meta stays in a RAM mirror. Pure reads do not
   durable-commit and do not serialize against each other.
 - **Batched durable commits.** Write, evict, prune, TTL-delete, reclaim, and
@@ -88,7 +90,7 @@ ImageBytesRequest
 ImageBytesResolver
    ├─ cache.read(key)     hit → return bytes
    ├─ empty payload       treat as miss
-   ├─ HttpBytesFetcher    pool + coalesce by URI + canonical headers
+   ├─ HttpBytesFetcher    pool + coalesce by ImageCacheKey identity
    └─ unawaited write     failure → diagnostics only
 ```
 

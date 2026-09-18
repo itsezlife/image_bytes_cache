@@ -9,9 +9,11 @@ import 'package:meta/meta.dart';
 
 /// Cache identity for remote image bytes (disk / durable store / PageStorage).
 ///
-/// Built so the string is safe as a filename: host + last path segment + a short
-/// hash of URL and headers. Without the hash, two URLs that share a basename
-/// would collide on disk.
+/// Filename-safe string: host + last path segment + a short fingerprint of the
+/// [Uri.base.resolve] canonical URL and canonical headers (length-prefixed
+/// material — not a `url|headers` join). Shared with [HttpBytesFetcher]
+/// coalesce via [value]. Without the fingerprint, two URLs that share a
+/// basename would collide on disk.
 @immutable
 final class ImageCacheKey {
   /// Wraps an already-safe [value] (tests, restore from storage).
@@ -19,19 +21,27 @@ final class ImageCacheKey {
 
   /// Derives [value] from [url] and optional [headers].
   ///
+  /// [url] is resolved with [Uri.base.resolve] before host/basename extraction
+  /// and fingerprinting, so a relative path and its absolute form against the
+  /// same base produce one key — matching the URI [ImageBytesResolver] GETs.
+  ///
   /// Header keys are lowercased and sorted before hashing so casing and map
   /// iteration order do not change identity (parity with
-  /// [HttpBytesFetcher] coalesce). Values stay as given. Distinct URLs that
-  /// share a basename still produce distinct keys via the fingerprint.
+  /// [HttpBytesFetcher] coalesce). Values stay as given. Fingerprint material
+  /// is a length-prefixed encoding of URL + canonical headers so a `|` (or any
+  /// other character) inside the URL or a header value cannot forge another
+  /// (url, headers) pair.
   ///
-  /// [value] is capped at [_maxValueLength] so hosts with long path segments
-  /// stay safe as filenames and web store keys (basename truncated; fingerprint
-  /// and host still distinguish collisions).
+  /// Distinct URLs that share a basename still produce distinct keys via the
+  /// fingerprint. [value] is capped at [_maxValueLength] so hosts with long
+  /// path segments stay safe as filenames and web store keys (basename
+  /// truncated; fingerprint and host still distinguish collisions).
   factory ImageCacheKey.fromUrl(
     String url, {
     Map<String, String>? headers,
   }) {
-    final uri = Uri.tryParse(url);
+    final canonicalUrl = Uri.base.resolve(url).toString();
+    final uri = Uri.tryParse(canonicalUrl);
     final host = switch (uri?.host) {
       final h? when h.isNotEmpty => h.replaceAll('.', '_'),
       _ => 'unknown',
@@ -41,10 +51,7 @@ final class ImageCacheKey {
       _ => 'asset',
     };
     var safeName = pathSeg.replaceAll(RegExp('[^a-zA-Z0-9._-]'), '_').replaceAll('..', '_');
-    final fingerprint = sha1
-        .convert(const Utf8Encoder().convert('$url|${canonicalHeaders(headers)}'))
-        .toString()
-        .substring(0, 12);
+    final fingerprint = sha1.convert(_fingerprintMaterial(canonicalUrl, headers)).toString().substring(0, 12);
     // Reserve room for host + '_' + '_' + 12-char fingerprint.
     final maxNameLen = (_maxValueLength - host.length - fingerprint.length - 2).clamp(8, _maxBasenameLength);
     if (safeName.length > maxNameLen) {
@@ -79,6 +86,29 @@ final class ImageCacheKey {
     final keys = normalized.keys.toList()..sort();
     return keys.map((k) => '$k=${normalized[k]}').join('&');
   }
+
+  /// Length-prefixed UTF-8 of canonical URL then canonical headers.
+  ///
+  /// Without length prefixes, a delimiter join such as `url|headers` lets a
+  /// URL that embeds `|…` forge the same fingerprint bytes as a clean URL plus
+  /// those headers (or a header value that embeds further `|` fields).
+  static List<int> _fingerprintMaterial(String canonicalUrl, Map<String, String>? headers) {
+    final urlBytes = const Utf8Encoder().convert(canonicalUrl);
+    final headerBytes = const Utf8Encoder().convert(canonicalHeaders(headers));
+    return <int>[
+      ..._u32be(urlBytes.length),
+      ...urlBytes,
+      ..._u32be(headerBytes.length),
+      ...headerBytes,
+    ];
+  }
+
+  static List<int> _u32be(int length) => <int>[
+    (length >> 24) & 0xff,
+    (length >> 16) & 0xff,
+    (length >> 8) & 0xff,
+    length & 0xff,
+  ];
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is ImageCacheKey && other.value == value;

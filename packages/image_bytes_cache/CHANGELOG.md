@@ -1,5 +1,9 @@
 ## 0.0.2
 
+- **FIXED**: Ladder identity — coalesce uses `ImageCacheKey` (no ambiguous
+  `url|headers` join); `fromUrl` fingerprints `Uri.base.resolve` canonical URLs
+  with length-prefixed material; explicit `cacheKey` documented as full identity
+  (headers on the wire do not silently change the key).
 - **FIXED**: `ImageBytesResolver.shared()` re-reads the process-wide cache and
   fetcher on every `resolve` instead of snapshotting them at first call.
   Configure after an early paint enables durable caching; configure replacement

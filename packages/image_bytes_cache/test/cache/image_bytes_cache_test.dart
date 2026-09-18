@@ -190,6 +190,41 @@ void main() {
       expect(b.value.length, lessThanOrEqualTo(180));
       expect(a, isNot(equals(b)));
     });
+
+    test('relative and absolute Uri.base equivalents share one key', () {
+      const relative = 'icons/logo.svg';
+      final absolute = Uri.base.resolve(relative).toString();
+      expect(ImageCacheKey.fromUrl(relative), equals(ImageCacheKey.fromUrl(absolute)));
+    });
+
+    test('URL containing |… without headers differs from clean URL plus those headers', () {
+      final poisoned = ImageCacheKey.fromUrl(
+        'https://cdn.example.com/a.svg|authorization=Bearer x',
+      );
+      final clean = ImageCacheKey.fromUrl(
+        'https://cdn.example.com/a.svg',
+        headers: const {'Authorization': 'Bearer x'},
+      );
+      expect(poisoned, isNot(equals(clean)));
+    });
+
+    test('pipe inside a header value cannot forge another URL+headers fingerprint', () {
+      final withPipeInValue = ImageCacheKey.fromUrl(
+        'https://cdn.example.com/a.svg',
+        headers: const {'authorization': 'Bearer x|foo=bar'},
+      );
+      final withPipeInUrl = ImageCacheKey.fromUrl(
+        'https://cdn.example.com/a.svg|authorization=Bearer x',
+        headers: const {'foo': 'bar'},
+      );
+      expect(withPipeInValue, isNot(equals(withPipeInUrl)));
+      // Same host/basename would still collide if fingerprint material used a
+      // raw `url|headers` join — assert the trailing fingerprint segments differ.
+      expect(
+        withPipeInValue.value.substring(withPipeInValue.value.length - 12),
+        isNot(equals(withPipeInUrl.value.substring(withPipeInUrl.value.length - 12))),
+      );
+    });
   });
 
   group('ImageBytesRetention.standard', () {

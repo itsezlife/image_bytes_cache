@@ -5,32 +5,47 @@ from paint code.
 
 ## Identity: `ImageCacheKey`
 
-Filename-safe string: host + safe basename + short fingerprint of URL and
-headers.
+Filename-safe string: host + safe basename + short fingerprint of the
+**canonical URL** and headers.
 
-`ImageCacheKey.fromUrl` lowercases header keys, last-wins on case duplicates,
-then sorts keys before hashing (`canonicalHeaders`). That matches
-`HttpBytesFetcher` coalesce, so header casing and map iteration order cannot
-split one logical download into two cache identities or two in-flight GETs.
+`ImageCacheKey.fromUrl` resolves the input with `Uri.base.resolve` before
+host/basename extraction and hashing, so a relative path and its absolute form
+against the same base share one key — the same URI form
+`ImageBytesResolver` uses for GET. Header keys are lowercased, last-wins on
+case duplicates, then sorted before hashing (`canonicalHeaders`). Fingerprint
+bytes are length-prefixed URL + canonical headers (not a `url|headers` string
+join), so a `|` inside the URL or a header value cannot forge another
+`(url, headers)` pair.
+
+`HttpBytesFetcher` coalesce uses `ImageCacheKey.fromUrl(…).value` as the
+in-flight map key, so coalesce identity and durable identity stay the same
+rules: header casing / map order cannot split one logical download, and
+delimiter collisions cannot merge two.
 
 Distinct URLs that share a basename still produce distinct keys via the
 fingerprint. Values are capped (~180 chars) so they stay safe as filesystem
 names and web store keys.
 
 Do not use basename-only disk keys. Do not treat header key casing as identity.
+Do not join URL and headers with an ambiguous delimiter for coalesce or
+fingerprinting.
 
 ## Request and resolve
 
 `ImageBytesRequest` carries `url`, optional `headers`, and optional
 `cacheKey`. When `cacheKey` is null, the resolver builds one with
-`ImageCacheKey.fromUrl`.
+`ImageCacheKey.fromUrl` (canonical URL + headers). When `cacheKey` is set, that
+value is the **full** durable identity: headers still go on the network GET but
+are not folded into the key. Hosts that vary `Authorization` across logical
+resources must omit `cacheKey` or mint distinct overrides — the ladder will not
+silently share one override across different Authorization values.
 
 `ImageBytesResolver` order:
 
 1. `cache.read(key)`. Non-empty hit returns immediately.
 2. Empty cached payload counts as a **miss** (bad empty write must not poison
    the ladder).
-3. `HttpBytesFetcher.getBytes` on miss.
+3. `HttpBytesFetcher.getBytes` on `Uri.base.resolve(url)` on miss.
 4. Return network bytes; schedule `cache.write` with `unawaited`. Write failure
    reports through `ImageBytesDiagnostics` and does **not** fail `resolve`.
 
@@ -51,10 +66,11 @@ GET bodies only. Callers own disk cache and decode.
 | `maxConcurrent` | 6 | Further callers wait in `Pool` |
 | `timeout` | 15s | Starts after a pool slot is acquired; wait for a slot is not timed |
 
-Concurrent calls with the same URI and canonical headers share one in-flight
-`Future`. Non-2xx → `ClientException`. Empty body → `StateError`. After
-`close`, new `getBytes` calls throw; in-flight work may still finish or fail.
-If the fetcher created its own `http.Client`, `close` closes that client.
+Concurrent calls that share the same `ImageCacheKey` identity (canonical URL +
+canonical headers) share one in-flight `Future`. Non-2xx → `ClientException`.
+Empty body → `StateError`. After `close`, new `getBytes` calls throw; in-flight
+work may still finish or fail. If the fetcher created its own `http.Client`,
+`close` closes that client.
 
 ## Diagnostics
 

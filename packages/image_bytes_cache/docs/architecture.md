@@ -22,9 +22,10 @@ Glossary terms live in [`CONTEXT.md`](../CONTEXT.md). Storage mechanics:
 
 ## Layers
 
-1. **Identity** (`ImageCacheKey`). Filename-safe key from URL + canonical
-   headers. Shared with HTTP coalesce so casing and map order cannot split one
-   logical fetch into two cache entries.
+1. **Identity** (`ImageCacheKey`). Filename-safe key from the
+   `Uri.base.resolve` canonical URL + canonical headers. Shared with HTTP
+   coalesce (`ImageCacheKey.value`) so casing, map order, and delimiter
+   collisions cannot split or merge logical fetches.
 2. **Cache contract** (`IImageBytesCache`). What paint code and the resolver
    call: `read` / `write` / `evict` / `prune` / `close`. Implementations:
    `IndexedImageBytesCache` (composition brain), `MemoryImageBytesCache`,

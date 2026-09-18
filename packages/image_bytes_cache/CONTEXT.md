@@ -18,10 +18,14 @@ Deep docs: [AGENTS.md](AGENTS.md) (agent orientation),
 ## Language
 
 **ImageCacheKey**:
-Filename-safe identity for a remote image body. Derived from URL + canonical
-headers (lowercase keys, sorted). Distinct URLs that share a basename do not
-collide.
-_Avoid_: basename-only disk keys, header casing as identity
+Filename-safe identity for a remote image body. Derived from the
+`Uri.base.resolve` canonical URL + canonical headers (lowercase keys, sorted).
+Fingerprint material is length-prefixed (not a `url|headers` join). Distinct
+URLs that share a basename do not collide. Relative and absolute forms of the
+same resource share one key. Explicit `ImageBytesRequest.cacheKey` is a full
+identity escape hatch: headers still go on the wire but are not folded in.
+_Avoid_: basename-only disk keys, header casing as identity, delimiter joins
+for coalesce/fingerprint, assuming override keys fold Authorization
 
 **IImageBytesCache** / **IndexedImageBytesCache**:
 Bytes store contract and the indexed composition over meta + blob halves.
@@ -59,8 +63,10 @@ Empty cached payloads count as a miss. Write-through failures do not fail paint.
 _Avoid_: failing resolve when durable write fails
 
 **HttpBytesFetcher**:
-HTTP GET with concurrency pool and in-flight coalesce by URI + canonical headers.
-_Avoid_: homemade download queues; Mutex for N-way downloads
+HTTP GET with concurrency pool and in-flight coalesce by `ImageCacheKey` identity
+(canonical URL + canonical headers).
+_Avoid_: homemade download queues; Mutex for N-way downloads; `url|headers`
+string joins for coalesce
 
 **ImageBytesDiagnostics**:
 Soft-failure policy (silent / developer log / onEvent). Process-wide `current`

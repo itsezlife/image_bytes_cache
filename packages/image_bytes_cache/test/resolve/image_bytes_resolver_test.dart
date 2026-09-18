@@ -110,6 +110,74 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(events, isEmpty);
     });
+
+    test('relative and absolute Uri.base equivalents share one durable key', () async {
+      var hits = 0;
+      final body = Uint8List.fromList([3, 3, 3]);
+      final fetcher = HttpBytesFetcher(
+        client: MockClient((_) async {
+          hits++;
+          return http.Response.bytes(body, 200);
+        }),
+      );
+      addTearDown(fetcher.close);
+
+      final cache = MemoryImageBytesCache();
+      final resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+
+      const relative = 'icons/shared.svg';
+      final absolute = Uri.base.resolve(relative).toString();
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: relative)), body);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(await resolver.resolve(ImageBytesRequest(url: absolute)), body);
+      expect(hits, 1);
+      expect(await cache.read(ImageCacheKey.fromUrl(relative)), body);
+      expect(await cache.read(ImageCacheKey.fromUrl(absolute)), body);
+    });
+
+    test('explicit cacheKey is full identity — headers do not change the key', () async {
+      var hits = 0;
+      final body = Uint8List.fromList([2, 2]);
+      final fetcher = HttpBytesFetcher(
+        client: MockClient((request) async {
+          hits++;
+          expect(request.headers['authorization'], isNotNull);
+          return http.Response.bytes(body, 200);
+        }),
+      );
+      addTearDown(fetcher.close);
+
+      final cache = MemoryImageBytesCache();
+      final resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+      const key = ImageCacheKey('host_override_key');
+
+      await resolver.resolve(
+        const ImageBytesRequest(
+          url: 'https://cdn.example.com/a.svg',
+          headers: {'Authorization': 'Bearer a'},
+          cacheKey: key,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(await cache.read(key), body);
+
+      // Different Authorization still on the wire for a miss path, but the
+      // durable slot is the explicit key — a warm hit must not key on headers.
+      expect(
+        await resolver.resolve(
+          const ImageBytesRequest(
+            url: 'https://cdn.example.com/a.svg',
+            headers: {'Authorization': 'Bearer b'},
+            cacheKey: key,
+          ),
+        ),
+        body,
+      );
+      expect(hits, 1);
+    });
   });
 
   group('ImageBytesResolver.shared live wiring', () {

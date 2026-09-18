@@ -18,12 +18,28 @@ final class ImageBytesRequest {
   });
 
   /// Absolute or [Uri.base]-relative URL.
+  ///
+  /// The ladder resolves this with [Uri.base.resolve] for both the network GET
+  /// and the default [ImageCacheKey] (when [cacheKey] is null), so relative and
+  /// absolute forms of the same resource share one durable identity.
   final String url;
 
-  /// Sent on the network hop and folded into the default [ImageCacheKey].
+  /// Sent on the network hop.
+  ///
+  /// When [cacheKey] is null, folded into the default [ImageCacheKey] via
+  /// [ImageCacheKey.fromUrl]. When [cacheKey] is set, still sent on the wire
+  /// but **not** folded into identity — see [cacheKey].
   final Map<String, String>? headers;
 
-  /// When null, built with [ImageCacheKey.fromUrl].
+  /// Optional full durable identity escape hatch.
+  ///
+  /// When null, built with [ImageCacheKey.fromUrl] from the canonical URL and
+  /// [headers]. When non-null, this value is the **entire** cache identity:
+  /// [headers] still go on the GET but do not change the key. Hosts that vary
+  /// `Authorization` (or any other header) across logical resources must either
+  /// omit [cacheKey] so headers participate, or mint distinct override keys
+  /// themselves — the ladder will not silently poison one override across
+  /// different Authorization values.
   final ImageCacheKey? cacheKey;
 }
 
@@ -57,8 +73,8 @@ final class ImageBytesResolver implements IImageBytesResolver {
     required IImageBytesCache cache,
     required HttpBytesFetcher fetcher,
     ImageBytesDiagnostics? diagnostics,
-  }) : _cacheOf = _fixedCache(cache),
-       _fetcherOf = _fixedFetcher(fetcher),
+  }) : _cacheOf = (() => cache),
+       _fetcherOf = (() => fetcher),
        _diagnostics = diagnostics;
 
   /// Process-wide ladder that re-reads shared cache/fetcher on every resolve.
@@ -66,12 +82,6 @@ final class ImageBytesResolver implements IImageBytesResolver {
     : _cacheOf = ImageBytesCache.shared,
       _fetcherOf = HttpBytesFetcher.shared,
       _diagnostics = diagnostics;
-
-  static IImageBytesCache Function() _fixedCache(IImageBytesCache cache) =>
-      () => cache;
-
-  static HttpBytesFetcher Function() _fixedFetcher(HttpBytesFetcher fetcher) =>
-      () => fetcher;
 
   /// Process-wide default when nothing is injected.
   ///
