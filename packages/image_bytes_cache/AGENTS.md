@@ -87,8 +87,11 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
 - **Empty cached payload = miss** in the resolver; write-through failure never
   fails a successful network resolve (diagnostics only).
 - **Open:** hard storage failure degrades to `MemoryImageBytesCache` unless
-  `throwOnOpenFailure`; missing VM `directory` still throws. `configure`
-  closes the previous shared instance before assign.
+  `throwOnOpenFailure`; partial VM worker / web handles are closed before
+  degrade or rethrow. Missing VM `directory` still throws. `configure`
+  closes the previous shared instance before assign. `ImageBytesResolver.shared`
+  re-reads process-wide cache/fetcher on each resolve (no one-shot snapshot).
+  `resetShared` also clears resolver shared wiring.
 - **Retention:** TTL on read; capacity on write/prune; no background timer.
   `standard` = 14 days / 500 entries / 50 MiB.
 

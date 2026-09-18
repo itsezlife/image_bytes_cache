@@ -12,6 +12,11 @@ import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 /// Call [ImageBytesCache.open] from app code, not this symbol. [directory] is
 /// required. Degraded open (Memory + diagnostic) is handled by
 /// [ImageBytesCache.open], not here.
+///
+/// On any failure after a blob store (and its isolate worker) exists, this
+/// function closes those partial resources before rethrowing so
+/// [ImageBytesCache.open] degrade / `throwOnOpenFailure` paths cannot leak
+/// workers. Missing [directory] still throws [ArgumentError] before any spawn.
 Future<IImageBytesCache> $openImageBytesCache({
   String? directory,
   ImageBytesRetention retention = ImageBytesRetention.standard,
@@ -22,26 +27,36 @@ Future<IImageBytesCache> $openImageBytesCache({
     _ => throw ArgumentError.value(directory, 'directory', 'required on VM'),
   };
 
-  final blobs = ImageBytesBlobStore$File$VM(directory: root);
-  await blobs.ensureDirectory();
-  final index = await ImageBytesIndex$File$VM.open(
-    directory: root,
-    io: blobs,
-    onWipe: blobs.wipeAll,
-  );
+  ImageBytesBlobStore$File$VM? blobs;
+  ImageBytesCache$VM? opened;
+  try {
+    blobs = ImageBytesBlobStore$File$VM(directory: root);
+    await blobs.ensureDirectory();
+    final index = await ImageBytesIndex$File$VM.open(
+      directory: root,
+      io: blobs,
+      onWipe: blobs.wipeAll,
+    );
 
-  final cache = ImageBytesCache$VM(
-    inner: IndexedImageBytesCache(
-      index: index,
+    opened = ImageBytesCache$VM(
+      inner: IndexedImageBytesCache(
+        index: index,
+        blobs: blobs,
+        retention: retention,
+        clock: clock,
+        reclaimOrphans: blobs.reclaimOrphans,
+      ),
       blobs: blobs,
-      retention: retention,
-      clock: clock,
-      reclaimOrphans: blobs.reclaimOrphans,
-    ),
-    blobs: blobs,
-  );
-  await cache.reclaimOrphans();
-  return cache;
+    );
+    // Ownership of [blobs] transferred to [opened]; close goes through the wrapper.
+    blobs = null;
+    await opened.reclaimOrphans();
+    return opened;
+  } on Object {
+    await opened?.close();
+    await blobs?.close();
+    rethrow;
+  }
 }
 
 /// Closes the isolate worker around [IndexedImageBytesCache].

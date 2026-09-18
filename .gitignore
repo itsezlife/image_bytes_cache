@@ -11,3 +11,6 @@ pubspec.lock
 *.log
 .fvm/
 coverage/
+
+# Local agent issue tracker / scratch notes
+.scratch/

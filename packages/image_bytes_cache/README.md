@@ -29,7 +29,8 @@ write-through.
 - **Soft diagnostics.** `silent`, `developer`, or `onEvent`. Process-wide
   policy at open/configure. No product logger dependency.
 - **Degraded open.** Hard storage failure falls back to
-  `MemoryImageBytesCache` unless `throwOnOpenFailure: true`. A missing VM
+  `MemoryImageBytesCache` unless `throwOnOpenFailure: true`. Partial VM workers
+  / web handles are closed before degrade or rethrow. A missing VM
   `directory` still throws.
 
 ## Quick start
@@ -100,8 +101,9 @@ ImageBytesResolver
 | `ImageBytesDiagnostics` | Soft failures: write-through, index wipe, degraded open |
 
 Inject cache and fetcher in tests. Production code usually uses
-`ImageBytesResolver.shared()`, which reads `ImageBytesCache.shared()` and
-`HttpBytesFetcher.shared()`.
+`ImageBytesResolver.shared()`, which re-reads `ImageBytesCache.shared()` and
+`HttpBytesFetcher.shared()` on every resolve (not a one-shot snapshot at first
+call).
 
 ## Retention
 

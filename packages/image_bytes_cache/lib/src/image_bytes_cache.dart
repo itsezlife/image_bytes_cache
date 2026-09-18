@@ -881,9 +881,11 @@ abstract final class ImageBytesCache {
   ///
   /// Hard open failures (quota, private mode, filesystem / Cache / OPFS errors)
   /// degrade to [MemoryImageBytesCache] with a warning unless
-  /// [throwOnOpenFailure] is true. [ArgumentError] from a missing VM
-  /// [directory] still throws: that is a host wiring bug, not storage
-  /// unavailability.
+  /// [throwOnOpenFailure] is true. Platform open hooks close any partially
+  /// opened VM worker or web handles before the failure surfaces here, so
+  /// neither degrade nor strict rethrow leaks isolates or Cache/OPFS quota.
+  /// [ArgumentError] from a missing VM [directory] still throws: that is a
+  /// host wiring bug, not storage unavailability.
   static Future<IImageBytesCache> open({
     String? directory,
     ImageBytesRetention retention = ImageBytesRetention.standard,
@@ -942,6 +944,10 @@ abstract final class ImageBytesCache {
 
   /// Closes the previous shared instance, then clears [configure] and
   /// [debugShared], and resets diagnostics to silent.
+  ///
+  /// Also invokes any registered ladder cleanup (see
+  /// [ImageBytesCache.afterResetShared]) so resolver shared wiring can clear
+  /// without this facade importing the resolver library.
   @visibleForTesting
   static Future<void> resetShared() async {
     final previous = _shared;
@@ -949,5 +955,13 @@ abstract final class ImageBytesCache {
     ImageBytesDiagnostics.current = const ImageBytesDiagnostics.silent();
     await previous?.close();
     _shared = null;
+    afterResetShared?.call();
   }
+
+  /// Optional cleanup after [resetShared] (resolver memo / debug override).
+  ///
+  /// Set by the resolver library so the store facade does not import the
+  /// ladder above it. Package-internal.
+  @internal
+  static void Function()? afterResetShared;
 }

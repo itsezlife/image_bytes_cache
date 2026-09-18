@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 import 'package:image_bytes_cache/src/isolate_controller.dart';
+import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 
 /// VM payload half of [IndexedImageBytesCache]: one file per [ImageCacheKey].
@@ -46,6 +47,11 @@ final class ImageBytesBlobStore$File$VM implements IImageBytesBlobStore {
   final Map<int, Completer<_BlobIoResponse>> _pending = {};
   var _nextId = 0;
   var _closed = false;
+
+  /// Live IO workers across all VM blob stores. Test seam for open-failure
+  /// cleanup: spawn increments, [close] decrements when a worker was live.
+  @visibleForTesting
+  static int debugActiveWorkerCount = 0;
 
   String _pathFor(ImageCacheKey key) => p.join(directory, key.value);
 
@@ -161,8 +167,11 @@ final class ImageBytesBlobStore$File$VM implements IImageBytesBlobStore {
     _pending.clear();
     await _subscription?.cancel();
     _subscription = null;
-    _controller?.close();
-    _controller = null;
+    if (_controller != null) {
+      debugActiveWorkerCount--;
+      _controller!.close();
+      _controller = null;
+    }
     _spawning = null;
   }
 
@@ -210,6 +219,7 @@ final class ImageBytesBlobStore$File$VM implements IImageBytesBlobStore {
       );
       _subscription = controller.stream.listen(_onResponse);
       _controller = controller;
+      debugActiveWorkerCount++;
       completer.complete();
       return controller;
     } on Object catch (error, stackTrace) {

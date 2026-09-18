@@ -121,6 +121,24 @@ void main() {
       expect(await cache.read(key), bytes);
     });
 
+    test('open failure degrade closes the partial VM worker', () async {
+      ImageBytesBlobStore$File$VM.debugActiveWorkerCount = 0;
+      final blocker = File(p.join(tempDir.path, 'not_a_directory'))..writeAsBytesSync([1]);
+
+      final cache = await ImageBytesCache.open(
+        directory: p.join(blocker.path, 'nested'),
+        retention: const ImageBytesRetention.unlimited(),
+      );
+      addTearDown(cache.close);
+
+      expect(cache, isA<MemoryImageBytesCache>());
+      expect(
+        ImageBytesBlobStore$File$VM.debugActiveWorkerCount,
+        0,
+        reason: 'degrade must close the worker spawned before mkdir failed',
+      );
+    });
+
     test('open failure throws when throwOnOpenFailure is true', () async {
       final blocker = File(p.join(tempDir.path, 'not_a_directory'))..writeAsBytesSync([1]);
 
@@ -133,7 +151,27 @@ void main() {
       );
     });
 
+    test('throwOnOpenFailure also closes the partial VM worker', () async {
+      ImageBytesBlobStore$File$VM.debugActiveWorkerCount = 0;
+      final blocker = File(p.join(tempDir.path, 'not_a_directory'))..writeAsBytesSync([1]);
+
+      await expectLater(
+        ImageBytesCache.open(
+          directory: p.join(blocker.path, 'nested'),
+          throwOnOpenFailure: true,
+        ),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(
+        ImageBytesBlobStore$File$VM.debugActiveWorkerCount,
+        0,
+        reason: 'strict open must not leave a live worker behind on failure',
+      );
+    });
+
     test('missing VM directory throws ArgumentError without degrading', () async {
+      ImageBytesBlobStore$File$VM.debugActiveWorkerCount = 0;
+
       await expectLater(
         ImageBytesCache.open(directory: null),
         throwsA(isA<ArgumentError>()),
@@ -141,6 +179,11 @@ void main() {
       await expectLater(
         ImageBytesCache.open(directory: ''),
         throwsA(isA<ArgumentError>()),
+      );
+      expect(
+        ImageBytesBlobStore$File$VM.debugActiveWorkerCount,
+        0,
+        reason: 'host wiring ArgumentError must not spawn or leak a worker',
       );
     });
 

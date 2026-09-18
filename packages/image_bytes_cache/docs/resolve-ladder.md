@@ -35,8 +35,12 @@ Do not use basename-only disk keys. Do not treat header key casing as identity.
    reports through `ImageBytesDiagnostics` and does **not** fail `resolve`.
 
 Inject cache and fetcher in tests. Production paint usually uses
-`ImageBytesResolver.shared()`, which reads `ImageBytesCache.shared()` and
-`HttpBytesFetcher.shared()` (or `debugShared` overrides).
+`ImageBytesResolver.shared()`, which **re-reads** `ImageBytesCache.shared()`
+and `HttpBytesFetcher.shared()` (or `debugShared` overrides) on every
+`resolve`. It does not snapshot them at first call, so configure after an
+early paint still enables durable caching, and configure replacement /
+`resetShared` cannot leave the ladder bound to NoOp or a closed previous
+store.
 
 ## HTTP: `HttpBytesFetcher`
 
@@ -86,16 +90,18 @@ The package does not depend on a product logger. Hosts bridge
 | VM `directory` | Required; prefer app cache root, not documents |
 | Web `directory` | Ignored |
 | `diagnostics` | Installed on `current` before open so wipe can report |
-| Hard open failure | Degrades to `MemoryImageBytesCache` + `open_degraded` unless `throwOnOpenFailure` |
-| Missing VM directory | Still throws `ArgumentError` (host wiring bug) |
+| Hard open failure | Degrades to `MemoryImageBytesCache` + `open_degraded` unless `throwOnOpenFailure`; platform open closes any partial VM worker / web handles before that surface |
+| Missing VM directory | Still throws `ArgumentError` (host wiring bug); no degrade and no worker spawn |
 
 `configure(cache)` closes any previous non-identical shared instance **before**
 assign so workers and Cache handles do not leak across reconfigure.
 `shared()` returns `NoOpImageBytesCache` until configure (or `debugShared`).
-`resetShared` (tests) closes, clears configure and debug overrides, and resets
-diagnostics to silent.
+`resetShared` (tests) closes, clears configure and debug overrides, resets
+diagnostics to silent, and clears `ImageBytesResolver` shared wiring.
 
 Bootstrap order: open (with diagnostics) → configure → paint via
 `ImageBytesResolver.shared()` (typically from `image_bytes_cache_flutter`
-widgets or an injected resolver). Resolver and fetcher shared factories stay
-thin; do not invent a fourth process-wide global for the same ladder.
+widgets or an injected resolver). Calling shared resolve **before** configure
+is safe: later configure is visible on the next resolve. Resolver and fetcher
+shared factories stay thin; do not invent a fourth process-wide global for the
+same ladder.

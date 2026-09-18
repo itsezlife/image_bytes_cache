@@ -111,6 +111,97 @@ void main() {
       expect(events, isEmpty);
     });
   });
+
+  group('ImageBytesResolver.shared live wiring', () {
+    tearDown(() async {
+      await ImageBytesCache.resetShared();
+      HttpBytesFetcher.debugShared = null;
+      ImageBytesResolver.debugShared = null;
+    });
+
+    test('resolve after prior shared call then configure hits the configured store', () async {
+      final body = Uint8List.fromList([3, 2, 1]);
+      HttpBytesFetcher.debugShared = HttpBytesFetcher(
+        client: MockClient((_) async => http.Response.bytes(body, 200)),
+      );
+
+      // Bootstrap race: paint may call shared() before configure.
+      final sharedBeforeConfigure = ImageBytesResolver.shared();
+      await sharedBeforeConfigure.resolve(
+        const ImageBytesRequest(url: 'https://cdn.example.com/pre-configure.svg'),
+      );
+
+      final store = MemoryImageBytesCache();
+      await ImageBytesCache.configure(store);
+
+      await ImageBytesResolver.shared().resolve(
+        const ImageBytesRequest(url: 'https://cdn.example.com/after-configure.svg'),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        await store.read(ImageCacheKey.fromUrl('https://cdn.example.com/after-configure.svg')),
+        body,
+        reason: 'shared resolve must use the configured store, not a snapped NoOp',
+      );
+    });
+
+    test('configure replacement does not leave shared resolve on a closed previous cache', () async {
+      final body = Uint8List.fromList([9, 8, 7]);
+      HttpBytesFetcher.debugShared = HttpBytesFetcher(
+        client: MockClient((_) async => http.Response.bytes(body, 200)),
+      );
+
+      final first = _CloseRejectingImageBytesCache();
+      await ImageBytesCache.configure(first);
+      await ImageBytesResolver.shared().resolve(
+        const ImageBytesRequest(url: 'https://cdn.example.com/first.svg'),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final second = MemoryImageBytesCache();
+      await ImageBytesCache.configure(second);
+      expect(first.closed, isTrue, reason: 'configure must close the previous store');
+
+      // Would throw if shared resolve still held the closed previous cache.
+      await ImageBytesResolver.shared().resolve(
+        const ImageBytesRequest(url: 'https://cdn.example.com/second.svg'),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        await second.read(ImageCacheKey.fromUrl('https://cdn.example.com/second.svg')),
+        body,
+      );
+    });
+
+    test('resetShared clears shared wiring so later configure is visible', () async {
+      final body = Uint8List.fromList([5]);
+      HttpBytesFetcher.debugShared = HttpBytesFetcher(
+        client: MockClient((_) async => http.Response.bytes(body, 200)),
+      );
+
+      final first = MemoryImageBytesCache();
+      await ImageBytesCache.configure(first);
+      await ImageBytesResolver.shared().resolve(
+        const ImageBytesRequest(url: 'https://cdn.example.com/before-reset.svg'),
+      );
+
+      await ImageBytesCache.resetShared();
+
+      final second = MemoryImageBytesCache();
+      await ImageBytesCache.configure(second);
+      await ImageBytesResolver.shared().resolve(
+        const ImageBytesRequest(url: 'https://cdn.example.com/after-reset.svg'),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        await second.read(ImageCacheKey.fromUrl('https://cdn.example.com/after-reset.svg')),
+        body,
+      );
+    });
+  });
 }
 
 /// Always misses; [write] always throws (simulates durable store failure).
@@ -133,4 +224,45 @@ final class _ThrowingWriteImageBytesCache implements IImageBytesCache {
 
   @override
   Future<void> close() async {}
+}
+
+/// Durable-like store: ops throw after [close] (Memory/NoOp stay usable).
+final class _CloseRejectingImageBytesCache implements IImageBytesCache {
+  bool closed = false;
+  final Map<ImageCacheKey, Uint8List> _entries = {};
+
+  void _ensureOpen() {
+    if (closed) {
+      throw StateError('cache is closed');
+    }
+  }
+
+  @override
+  Future<Uint8List?> read(ImageCacheKey key) async {
+    _ensureOpen();
+    return _entries[key];
+  }
+
+  @override
+  Future<void> write(ImageCacheKey key, Uint8List bytes) async {
+    _ensureOpen();
+    _entries[key] = bytes;
+  }
+
+  @override
+  Future<void> evict(ImageCacheKey key) async {
+    _ensureOpen();
+    _entries.remove(key);
+  }
+
+  @override
+  Future<ImageBytesPruneReport> prune() async {
+    _ensureOpen();
+    return const ImageBytesPruneReport(evictedKeys: [], freedBytes: 0);
+  }
+
+  @override
+  Future<void> close() async {
+    closed = true;
+  }
 }

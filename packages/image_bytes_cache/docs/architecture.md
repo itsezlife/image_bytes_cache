@@ -57,7 +57,9 @@ await ImageBytesCache.configure(
 
 On web, `directory` is ignored. Hard storage failure returns
 `MemoryImageBytesCache` and reports `open_degraded` unless
-`throwOnOpenFailure: true`. Missing VM `directory` still throws (`ArgumentError`).
+`throwOnOpenFailure: true`; platform open closes any partial VM worker or web
+handles before that surface. Missing VM `directory` still throws
+(`ArgumentError`).
 
 **Paint path:**
 
@@ -67,6 +69,9 @@ On web, `directory` is ignored. Hard storage failure returns
 2. On miss, `HttpBytesFetcher.getBytes` (pool + in-flight coalesce).
 3. Return network bytes immediately; `cache.write` runs unawaited. Write
    failure reports diagnostics and does not fail the resolve future.
+
+`ImageBytesResolver.shared()` re-reads `ImageBytesCache.shared()` /
+`HttpBytesFetcher.shared()` on each resolve (not a one-shot snapshot).
 
 **Durable hit (after open):**
 

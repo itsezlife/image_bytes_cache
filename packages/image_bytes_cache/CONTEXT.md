@@ -71,10 +71,14 @@ _Avoid_: `package:l` inside the ladder; `enableLogging` bool soup
 **ImageBytesCache.open / configure / shared / resetShared**:
 Host wiring. VM `directory` must be under a reclaimable cache root. Web ignores
 `directory`. Hard open failure degrades to in-memory with a warning unless
-`throwOnOpenFailure` is set; missing VM directory still throws. `configure`
-closes the previous instance before assign; `resetShared` closes then clears.
+`throwOnOpenFailure` is set; platform open closes any partial worker / web
+handles first. Missing VM directory still throws. `configure` closes the
+previous instance before assign; `resetShared` closes then clears, including
+`ImageBytesResolver` shared wiring. `ImageBytesResolver.shared` looks up the
+current shared cache/fetcher on each resolve (not a one-shot snapshot).
 _Avoid_: documents/support paths for remote image bytes; Config paths inside
-package open code; letting open throw kill bootstrap when storage is optional
+package open code; letting open throw kill bootstrap when storage is optional;
+assuming first `shared().resolve` permanently binds NoOp
 
 ## Web smoke
 
