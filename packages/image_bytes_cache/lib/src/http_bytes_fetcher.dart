@@ -8,8 +8,8 @@ import 'package:pool/pool.dart';
 
 /// HTTP GET for response bodies, with a concurrency cap and in-flight coalescing.
 ///
-/// Fetches bytes only. Callers own disk cache and decoding. Format is irrelevant
-/// here: SVG, PNG, WebP, or anything else the ladder later paints or decodes.
+/// Fetches bytes only. Callers own disk cache and decoding. Format is
+/// irrelevant here; hosts decode or paint whatever the URL returns.
 ///
 /// A feed of remote images can open dozens of sockets without [Pool]. Two
 /// callers that share the same [ImageCacheKey] identity (canonical URL +

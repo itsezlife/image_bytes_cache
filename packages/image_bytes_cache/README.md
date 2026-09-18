@@ -3,10 +3,9 @@
 [![Dart](https://img.shields.io/badge/Dart-%230175C2.svg?style=flat&logo=dart&logoColor=white)](https://dart.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Caches remote image **bytes** (SVG, PNG, and other payloads) with an identity
-key, a RAM meta mirror after open, platform blob stores, and a resolve ladder:
-cache hit, then network with in-flight coalesce, then fire-and-forget
-write-through.
+Caches remote image **bytes** with an identity key, a RAM meta mirror after
+open, platform blob stores, and a resolve ladder: cache hit, then network with
+in-flight coalesce, then fire-and-forget write-through.
 
 ## Features
 
@@ -71,13 +70,12 @@ await ImageBytesCache.configure(
 ```dart
 final bytes = await ImageBytesResolver.shared().resolve(
   ImageBytesRequest(
-    url: 'https://cdn.example.com/logo.svg',
-    headers: const {'Accept': 'image/svg+xml'},
+    url: 'https://cdn.example.com/logo.png',
   ),
 );
 ```
 
-For Flutter paint (SVG today), use
+For Flutter paint, use
 [`image_bytes_cache_flutter`](../image_bytes_cache_flutter/) after the same
 `open` / `configure` call.
 

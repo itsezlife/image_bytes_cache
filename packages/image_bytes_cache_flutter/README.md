@@ -6,9 +6,8 @@
 
 Flutter paint adapters for
 [`image_bytes_cache`](../image_bytes_cache/). Widgets resolve remote image
-**bytes** through the core ladder, then paint. First slice: remote SVG via
-`CachedNetworkSvgImage`. Raster `ImageProvider`s may land here later; durable
-storage stays in the core package.
+**bytes** through the core ladder, then paint. Ships `CachedNetworkSvgImage`
+for remote SVG. Durable storage stays in the core package.
 
 This package does not open files, sockets, or durable stores. Hosts still call
 `ImageBytesCache.open` / `configure` on the core package before paint.
@@ -17,8 +16,8 @@ This package does not open files, sockets, or durable stores. Hosts still call
 
 - **Thin paint layer.** Depends on `IImageBytesResolver` / `ImageCacheKey` only.
   No second resolve tree, no blob IO in widgets.
-- **Remote SVG.** `CachedNetworkSvgImage` loads via the shared resolver and
-  draws with `SvgPicture.memory`.
+- **CachedNetworkSvgImage.** Loads via the shared resolver and draws with
+  `SvgPicture.memory`.
 - **Scroll-friendly identity.** Optional short-lived `PageStorage` copy under
   the same `ImageCacheKey` as the durable store.
 - **Sealed load states.** `CachedNetworkSvgImageState` is
@@ -67,7 +66,7 @@ await ImageBytesCache.configure(
 See the [core README](../image_bytes_cache/README.md) for retention,
 diagnostics, and platform backends.
 
-### 2. Paint an SVG
+### 2. Paint with `CachedNetworkSvgImage`
 
 ```dart
 import 'package:flutter/material.dart';
@@ -142,9 +141,9 @@ IImageBytesResolver  (image_bytes_cache)
 | Package | Owns |
 | --- | --- |
 | `image_bytes_cache` | Open/configure, retention, blob stores, resolve ladder, store microbenches |
-| `image_bytes_cache_flutter` (this) | Widgets / future ImageProviders, widget tests, Flutter-side profile benches |
+| `image_bytes_cache_flutter` (this) | Paint widgets, widget tests, Flutter-side profile benches |
 
-Do not keep a second SVG resolve/paint implementation in a design-system
+Do not keep a second resolve/paint implementation in a design-system
 package. Re-export from here if call sites need a stable host import.
 
 ## Platform support

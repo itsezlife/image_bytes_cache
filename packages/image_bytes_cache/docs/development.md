@@ -103,7 +103,7 @@ package on `dart.library.html`.
 - Orphan reclaim only under `IndexedImageBytesCache`’s exclusive domain.
 - Public members keep contract-grade `///` docs (see existing types).
 - Core `lib/` must not import `package:flutter` or `package:shared`.
-- Do not add Flutter widgets, ImageProviders, or profile-feed harnesses here —
+- Do not add Flutter widgets or profile-feed harnesses here —
   those belong in `image_bytes_cache_flutter` / flutter-side compare.
 
 ## Benchmarks

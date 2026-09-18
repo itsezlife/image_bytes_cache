@@ -1,10 +1,10 @@
 # Architecture
 
-`image_bytes_cache` is a durable store for **remote image bytes** (SVG, PNG, and
-other payloads). It is the pure-Dart core package in this repository. Sibling
-`image_bytes_cache_flutter` paints above it. This package owns identity,
-retention, platform persistence, and the resolve ladder. It does not own
-decode, Flutter `ImageCache`, or UI widgets.
+`image_bytes_cache` is a durable store for **remote image bytes**. It is the
+pure-Dart core package in this repository. Sibling `image_bytes_cache_flutter`
+paints above it. This package owns identity, retention, platform persistence,
+and the resolve ladder. It does not own decode, Flutter `ImageCache`, or UI
+widgets.
 
 ```
 image_bytes_cache_flutter widget
@@ -103,7 +103,7 @@ or tests): environment-specific stores, `ImageBytesIndexDocumentCodec`,
 | Layer | Owns |
 | --- | --- |
 | `image_bytes_cache` (this package) | Durable bytes engine, ladder, open/configure, diagnostics; store / ladder microbenches |
-| `image_bytes_cache_flutter` (sibling) | Flutter widgets / ImageProviders that decode and paint from `IImageBytesResolver` bytes; PageStorage keys aligned with `ImageCacheKey`; UI/profile benches and `benchmark_compare/` under that package |
+| `image_bytes_cache_flutter` (sibling) | Flutter widgets that decode and paint from `IImageBytesResolver` bytes; PageStorage keys aligned with `ImageCacheKey`; UI/profile benches and `benchmark_compare/` under that package |
 
 New storage code lands here. New paint widgets land in the flutter package, not
 in a host UI util tree and not in this core.

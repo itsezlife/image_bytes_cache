@@ -11,7 +11,7 @@ Standalone, non-published package under
 2. **Profile scroll-pressure matrix** — real-device `--profile` scroll of a
    product-like list painted through `image_bytes_cache_flutter`
    (`CachedNetworkSvgImage`), capturing TimelineSummary frame build/raster
-   per named cell (`list/speed/complexity`). Ours-only today; competitor
+   per named cell (`list/speed/complexity`). Ours-only; competitor
    paint columns only when fair.
 
 Competitor deps live **only** here — never on the core or flutter package
