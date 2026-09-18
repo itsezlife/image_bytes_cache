@@ -2,9 +2,9 @@
 ///
 /// Expects the map written by `integrationDriver()` (typically
 /// `build/integration_response_data.json`). Report keys follow
-/// [ProfileReportKey]: matrix cells use
-/// `scroll_<adapter>__<list>_<speed>_<complexity>`; an unlabeled single run
-/// uses `scroll_<adapter>` (cell id `default`).
+/// [ProfileReportKey]: curated cells use `scroll_<adapter>__<cell-id>`
+/// (e.g. `scroll_ours__warm-scroll`); an unlabeled single run uses
+/// `scroll_<adapter>` (cell id `default`).
 ///
 /// This lane is **not** a CI merge gate and does not replace core store
 /// microbenches or the bytes-ready doctrine tables.
@@ -56,7 +56,11 @@ List<(String cellId, String adapterId)> discoverTimelineReportKeys(
 String formatAllTimelineSummariesMarkdown(
   Map<String, Object?> data, {
   String? cellId,
-  List<String> preferredAdapters = const <String>['ours'],
+  List<String> preferredAdapters = const <String>[
+    'ours',
+    'ce_hive',
+    'stock_cni',
+  ],
 }) {
   final discovered = discoverTimelineReportKeys(data);
   final cellIds = <String>{

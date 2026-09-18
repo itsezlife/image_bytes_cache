@@ -2,43 +2,62 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image_bytes_cache_benchmark_compare/profile_matrix.dart';
 
 void main() {
-  group('ProfileMatrixCell', () {
-    test('id is list/speed/complexity', () {
-      const cell = ProfileMatrixCell(
-        listSize: FeedListSize.large,
-        scroll: ScrollIntensity.fast,
-        complexity: FeedComplexity.complicated,
+  group('ProfileMatrixCell curated catalog', () {
+    test('warm / cold / pressure ids and contracts', () {
+      expect(ProfileMatrixCell.warmScroll.id, 'warm-scroll');
+      expect(ProfileMatrixCell.warmScroll.listSize, FeedListSize.medium);
+      expect(ProfileMatrixCell.warmScroll.scroll, ScrollIntensity.medium);
+      expect(ProfileMatrixCell.warmScroll.complexity, FeedComplexity.ordinary);
+      expect(ProfileMatrixCell.warmScroll.warmSettle, isTrue);
+
+      expect(ProfileMatrixCell.coldScroll.id, 'cold-scroll');
+      expect(ProfileMatrixCell.coldScroll.complexity, FeedComplexity.complicated);
+      expect(ProfileMatrixCell.coldScroll.warmSettle, isFalse);
+
+      expect(ProfileMatrixCell.pressureScroll.id, 'pressure-scroll');
+      expect(ProfileMatrixCell.pressureScroll.listSize, FeedListSize.large);
+      expect(ProfileMatrixCell.pressureScroll.scroll, ScrollIntensity.fast);
+      expect(
+        ProfileMatrixCell.pressureScroll.complexity,
+        FeedComplexity.complicated,
       );
-      expect(cell.id, 'large/fast/complicated');
-      expect(cell.reportKey, 'scroll_ours__large_fast_complicated');
     });
 
-    test('parseId round-trips known cells', () {
-      final cell = ProfileMatrixCell.parseId('medium/medium/ordinary');
-      expect(cell.listSize, FeedListSize.medium);
-      expect(cell.scroll, ScrollIntensity.medium);
-      expect(cell.complexity, FeedComplexity.ordinary);
-      expect(cell.id, 'medium/medium/ordinary');
+    test('reportKeyFor encodes adapter + hyphenated cell id', () {
+      expect(
+        ProfileMatrixCell.warmScroll.reportKeyFor('ours'),
+        'scroll_ours__warm-scroll',
+      );
+      expect(
+        ProfileMatrixCell.pressureScroll.reportKeyFor('stock_cni'),
+        'scroll_stock_cni__pressure-scroll',
+      );
+    });
+
+    test('parseId round-trips curated cells', () {
+      for (final cell in ProfileMatrixCell.curated) {
+        expect(ProfileMatrixCell.parseId(cell.id), cell);
+      }
     });
 
     test('parseId rejects unknown tokens', () {
       expect(
-        () => ProfileMatrixCell.parseId('huge/fast/ordinary'),
+        () => ProfileMatrixCell.parseId('large/fast/complicated'),
         throwsArgumentError,
       );
     });
   });
 
   group('ProfileReportKey', () {
-    test('encodes and parses matrix keys including underscored adapters', () {
+    test('encodes and parses hyphenated curated keys', () {
       final key = ProfileReportKey.encode(
-        adapter: 'stock_cni',
-        cellId: 'large/fast/complicated',
+        adapter: 'ce_hive',
+        cellId: 'cold-scroll',
       );
-      expect(key, 'scroll_stock_cni__large_fast_complicated');
+      expect(key, 'scroll_ce_hive__cold-scroll');
       expect(
         ProfileReportKey.tryParse(key),
-        ('large/fast/complicated', 'stock_cni'),
+        ('cold-scroll', 'ce_hive'),
       );
     });
 
@@ -54,49 +73,18 @@ void main() {
     });
   });
 
-  group('matrix catalogs', () {
-    test('default subset is medium × medium × ordinary+complicated', () {
+  group('resolveCells', () {
+    test('defaults to the three curated cells', () {
       expect(
-        ProfileMatrixCell.defaultSubset.map((c) => c.id).toList(),
-        <String>[
-          'medium/medium/ordinary',
-          'medium/medium/complicated',
-        ],
+        ProfileMatrixCell.resolveCells().map((c) => c.id).toList(),
+        <String>['warm-scroll', 'cold-scroll', 'pressure-scroll'],
       );
     });
 
-    test('full factorial is 3 × 3 × 2 named cells', () {
-      final cells = ProfileMatrixCell.fullFactorial;
-      expect(cells, hasLength(18));
-      expect(cells.map((c) => c.id).toSet(), hasLength(18));
-      expect(cells.any((c) => c.id == 'small/slow/ordinary'), isTrue);
-      expect(cells.any((c) => c.id == 'large/fast/complicated'), isTrue);
-    });
-
-    test('resolveCells: subset by default, full when MatrixRunMode.full', () {
-      expect(
-        ProfileMatrixCell.resolveCells().map((c) => c.id),
-        ProfileMatrixCell.defaultSubset.map((c) => c.id),
-      );
-      expect(
-        ProfileMatrixCell.resolveCells(mode: MatrixRunMode.full),
-        hasLength(18),
-      );
-    });
-
-    test('resolveCells: CELL overrides to a single cell', () {
-      final cells = ProfileMatrixCell.resolveCells(
-        cellId: 'large/fast/complicated',
-        mode: MatrixRunMode.full,
-      );
+    test('CELL overrides to a single cell', () {
+      final cells = ProfileMatrixCell.resolveCells(cellId: 'pressure-scroll');
       expect(cells, hasLength(1));
-      expect(cells.single.id, 'large/fast/complicated');
-    });
-
-    test('MatrixRunMode.parse is fail-closed', () {
-      expect(MatrixRunMode.parse('subset'), MatrixRunMode.subset);
-      expect(MatrixRunMode.parse('full'), MatrixRunMode.full);
-      expect(() => MatrixRunMode.parse('all'), throwsArgumentError);
+      expect(cells.single.id, 'pressure-scroll');
     });
   });
 

@@ -47,15 +47,15 @@ final class BytesScenario {
   final Future<int> Function(IBytesReadyAdapter adapter) run;
 }
 
-/// Primary scenario set for the bytes tables.
+/// Primary scenario set for the bytes tables (small corpus only).
+///
+/// Large twins were near-duplicates in harvested ratios and are covered by
+/// the raster profile cells that mix under/over the 64 KiB cut.
 List<BytesScenario> bytesScenarios() {
   final small = payloadFor(PayloadClass.small);
-  final large = payloadFor(PayloadClass.large);
   return [
     _coldMiss('cold_miss_small', PayloadClass.small, small.length),
-    _coldMiss('cold_miss_large', PayloadClass.large, large.length),
     _warmHit('warm_hit_small', PayloadClass.small, small.length),
-    _warmHit('warm_hit_large', PayloadClass.large, large.length),
     _sameUrlBurst('same_url_burst_small', PayloadClass.small, small.length),
     _manyKeys('many_distinct_keys_small', PayloadClass.small, small.length),
   ];

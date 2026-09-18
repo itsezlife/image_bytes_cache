@@ -43,18 +43,18 @@ void main() {
       expect(md, contains('frame count'));
     });
 
-    test('reads matrix report keys for named cells', () {
+    test('reads curated report keys for named cells', () {
       final data = <String, Object?>{
-        'scroll_ours__large_fast_complicated': _summary(buildAvg: 3.5),
+        'scroll_ours__pressure-scroll': _summary(buildAvg: 3.5),
       };
 
       final md = formatTimelineSummaryMarkdown(
         data,
         adapters: const <String>['ours'],
-        cellId: 'large/fast/complicated',
+        cellId: 'pressure-scroll',
       );
 
-      expect(md, contains('large/fast/complicated'));
+      expect(md, contains('pressure-scroll'));
       expect(md, contains('3.50'));
     });
 
@@ -81,49 +81,54 @@ void main() {
   });
 
   group('formatAllTimelineSummariesMarkdown', () {
-    test('emits one named table per discovered matrix cell', () {
+    test('emits one named table per discovered curated cell', () {
       final data = <String, Object?>{
-        'scroll_ours__medium_medium_ordinary': _summary(buildAvg: 1.0),
-        'scroll_ours__medium_medium_complicated': _summary(buildAvg: 2.0),
+        'scroll_ours__warm-scroll': _summary(buildAvg: 1.0),
+        'scroll_ours__cold-scroll': _summary(buildAvg: 2.0),
+        'scroll_ce_hive__warm-scroll': _summary(buildAvg: 1.5),
       };
 
-      final md = formatAllTimelineSummariesMarkdown(data);
+      final md = formatAllTimelineSummariesMarkdown(
+        data,
+        preferredAdapters: const <String>['ours', 'ce_hive', 'stock_cni'],
+      );
 
-      expect(md, contains('medium/medium/ordinary'));
-      expect(md, contains('medium/medium/complicated'));
+      expect(md, contains('warm-scroll'));
+      expect(md, contains('cold-scroll'));
+      expect(md, contains('ce_hive'));
       expect(md, contains('|                1 |'));
       expect(md, contains('|                2 |'));
     });
 
     test('--cell filter keeps a single matrix table', () {
       final data = <String, Object?>{
-        'scroll_ours__medium_medium_ordinary': _summary(buildAvg: 1.0),
-        'scroll_ours__medium_medium_complicated': _summary(buildAvg: 2.0),
+        'scroll_ours__warm-scroll': _summary(buildAvg: 1.0),
+        'scroll_ours__cold-scroll': _summary(buildAvg: 2.0),
       };
 
       final md = formatAllTimelineSummariesMarkdown(
         data,
-        cellId: 'medium/medium/ordinary',
+        cellId: 'warm-scroll',
       );
 
-      expect(md, contains('medium/medium/ordinary'));
-      expect(md, isNot(contains('complicated')));
+      expect(md, contains('warm-scroll'));
+      expect(md, isNot(contains('cold-scroll')));
     });
   });
 
   group('discoverTimelineReportKeys', () {
-    test('maps matrix and default keys to cell ids', () {
+    test('maps curated and default keys to cell ids', () {
       final keys = discoverTimelineReportKeys(<String, Object?>{
-        'scroll_ours__large_fast_complicated': _summary(),
+        'scroll_ours__pressure-scroll': _summary(),
         'scroll_ours': _summary(),
-        'scroll_stock_cni__medium_medium_ordinary': _summary(),
+        'scroll_stock_cni__warm-scroll': _summary(),
       });
       expect(
         keys,
         containsAll(<(String, String)>[
           ('default', 'ours'),
-          ('large/fast/complicated', 'ours'),
-          ('medium/medium/ordinary', 'stock_cni'),
+          ('pressure-scroll', 'ours'),
+          ('warm-scroll', 'stock_cni'),
         ]),
       );
     });

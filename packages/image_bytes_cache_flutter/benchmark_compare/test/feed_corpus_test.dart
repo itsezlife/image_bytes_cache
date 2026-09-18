@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -16,7 +15,7 @@ void main() {
       expect(urls.toSet(), hasLength(feedOrdinaryUniqueSlots));
       for (final url in urls) {
         expect(url, startsWith('https://bench.invalid/feed/'));
-        expect(url, endsWith('.svg'));
+        expect(url, endsWith('.png'));
       }
     });
 
@@ -28,18 +27,22 @@ void main() {
       expect(urls.toSet(), <String>{feedProseUrl()});
     });
 
-    test('SVG payloads are well-formed UTF-8 and resolve by URL', () {
-      final bytes = feedSvgBytes(slot: 2, minBytes: 512);
-      final text = utf8.decode(bytes);
-      expect(text, contains('<svg'));
-      expect(text, contains('</svg>'));
-      expect(bytes.length, greaterThanOrEqualTo(512));
+    test('PNG payloads carry signature, meet minBytes, resolve by URL', () {
+      final bytes = feedPngBytes(slot: 2, minBytes: feedSmallMinBytes);
+      expect(isPngSignature(bytes), isTrue);
+      expect(bytes.length, greaterThanOrEqualTo(feedSmallMinBytes));
 
       final fromUrl = feedPayloadForUrl(feedUrl(slot: 2));
       expect(fromUrl, isNotNull);
       if (fromUrl case final Uint8List resolved) {
-        expect(utf8.decode(resolved), contains('<svg'));
+        expect(isPngSignature(resolved), isTrue);
       }
+    });
+
+    test('large PNG meets the 64 KiB cut with PNG signature', () {
+      final large = feedPngBytes(slot: 1, minBytes: feedLargeMinBytes);
+      expect(isPngSignature(large), isTrue);
+      expect(large.length, greaterThanOrEqualTo(feedLargeMinBytes));
     });
   });
 }

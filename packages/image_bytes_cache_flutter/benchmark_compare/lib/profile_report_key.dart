@@ -6,10 +6,11 @@ library;
 
 /// Encodes / parses `scroll_<adapter>[__<cell>]` driver report keys.
 ///
-/// Format: `scroll_<adapter>__<list>_<speed>_<complexity>` for matrix cells,
-/// or `scroll_<adapter>` for the unlabeled single-run cell id `default`.
-/// Adapter ids may contain underscores; the separator between adapter and
-/// cell encoding is the first `__`.
+/// Format: `scroll_<adapter>__<cell-id>` for curated cells (prefer hyphens in
+/// [cellId] so `/`↔`_` remapping stays reversible), or `scroll_<adapter>` for
+/// the unlabeled single-run cell id `default`. Adapter ids may contain
+/// underscores; the separator between adapter and cell encoding is the first
+/// `__`.
 abstract final class ProfileReportKey {
   /// Cell id used when a report key has no matrix suffix.
   static const String defaultCellId = 'default';

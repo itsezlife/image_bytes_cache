@@ -1,4 +1,4 @@
-/// Shared MockClient that serves corpus bodies (bytes tables and/or feed SVG).
+/// Shared MockClient that serves corpus bodies (bytes tables and/or feed PNG).
 library;
 
 import 'dart:typed_data';
@@ -10,7 +10,7 @@ import 'package:image_bytes_cache_benchmark_compare/feed_corpus.dart';
 
 /// Counts GETs while returning corpus bytes (404 when URL is unknown).
 ///
-/// [resolvePayload] defaults to bytes-table [payloadForUrl], then feed SVG via
+/// [resolvePayload] defaults to bytes-table [payloadForUrl], then feed PNG via
 /// [feedPayloadForUrl], so one client can serve both lanes when needed.
 ({MockClient client, int Function() fetchCount}) corpusHttpClient({
   Duration responseDelay = Duration.zero,

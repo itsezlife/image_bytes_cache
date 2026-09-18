@@ -1,14 +1,13 @@
-/// Scroll-pressure matrix: list size × scroll intensity × complexity.
+/// Curated scroll-pressure cells for the raster profile compare.
 ///
-/// Profile-mode cells are named `list/speed/complexity` (e.g.
-/// `large/fast/complicated`). The default day-to-day subset is medium ×
-/// medium × ordinary+complicated; [MatrixRunMode.full] expands to the full
+/// Profile-mode cells are named product scenarios (`warm-scroll`,
+/// `cold-scroll`, `pressure-scroll`) — not a list×speed×complexity
 /// factorial. Lives only in flutter-side `benchmark_compare` — never in
 /// pure-Dart core.
 ///
 /// Gesture recipes and item counts are concrete contracts so adapters share
 /// the same pressure under a cell id. Decode/paint cost is in scope for this
-/// lane; bytes-ready ratios stay in the separate bytes tables.
+/// lane; bytes-ready ratios stay in the separate slim bytes tables.
 ///
 /// TimelineSummary report keys are owned here ([reportKeyFor]) so summarize
 /// and the drive target cannot drift.
@@ -19,24 +18,8 @@ import 'dart:ui' show Offset;
 import 'package:flutter/foundation.dart' show immutable;
 import 'package:image_bytes_cache_benchmark_compare/profile_report_key.dart';
 
-export 'package:image_bytes_cache_benchmark_compare/profile_report_key.dart' show ProfileReportKey;
-
-/// Which catalog a harness run executes.
-enum MatrixRunMode {
-  /// [ProfileMatrixCell.defaultSubset] (medium × medium × ordinary+complicated).
-  subset,
-
-  /// Every list × speed × complexity combination.
-  full
-  ;
-
-  /// Parses `subset` / `full` or throws [ArgumentError].
-  static MatrixRunMode parse(String raw) => switch (raw) {
-    'subset' => MatrixRunMode.subset,
-    'full' => MatrixRunMode.full,
-    _ => throw ArgumentError.value(raw, 'MATRIX', 'Unknown MatrixRunMode'),
-  };
-}
+export 'package:image_bytes_cache_benchmark_compare/profile_report_key.dart'
+    show ProfileReportKey;
 
 /// Feed length tier for one matrix cell.
 enum FeedListSize {
@@ -55,17 +38,6 @@ enum FeedListSize {
     FeedListSize.small => 24,
     FeedListSize.medium => 48,
     FeedListSize.large => 120,
-  };
-
-  /// Token used in [ProfileMatrixCell.id].
-  String get id => name;
-
-  /// Parses a list-size token or throws [ArgumentError].
-  static FeedListSize parse(String raw) => switch (raw) {
-    'small' => FeedListSize.small,
-    'medium' => FeedListSize.medium,
-    'large' => FeedListSize.large,
-    _ => throw ArgumentError.value(raw, 'listSize', 'Unknown FeedListSize'),
   };
 }
 
@@ -118,21 +90,6 @@ enum ScrollIntensity {
       passCount: 8,
     ),
   };
-
-  /// Token used in [ProfileMatrixCell.id].
-  String get id => name;
-
-  /// Parses a scroll-intensity token or throws [ArgumentError].
-  static ScrollIntensity parse(String raw) => switch (raw) {
-    'slow' => ScrollIntensity.slow,
-    'medium' => ScrollIntensity.medium,
-    'fast' => ScrollIntensity.fast,
-    _ => throw ArgumentError.value(
-      raw,
-      'scroll',
-      'Unknown ScrollIntensity',
-    ),
-  };
 }
 
 /// Cache / corpus pressure mode for one matrix cell.
@@ -144,20 +101,6 @@ enum FeedComplexity {
   /// in-view coalesce bursts.
   complicated
   ;
-
-  /// Token used in [ProfileMatrixCell.id].
-  String get id => name;
-
-  /// Parses a complexity token or throws [ArgumentError].
-  static FeedComplexity parse(String raw) => switch (raw) {
-    'ordinary' => FeedComplexity.ordinary,
-    'complicated' => FeedComplexity.complicated,
-    _ => throw ArgumentError.value(
-      raw,
-      'complexity',
-      'Unknown FeedComplexity',
-    ),
-  };
 }
 
 /// Density feed content control (`FEED` dart-define).
@@ -194,15 +137,23 @@ enum FeedItemMode {
   };
 }
 
-/// One named cell in the scroll-pressure matrix.
+/// One named curated cell in the scroll-pressure catalog.
 @immutable
 final class ProfileMatrixCell {
-  /// Creates a cell from the three locked dimensions.
+  /// Creates a curated cell from locked dimensions.
   const ProfileMatrixCell({
+    required this.id,
     required this.listSize,
     required this.scroll,
     required this.complexity,
+    required this.warmSettle,
   });
+
+  /// Stable cell id for logs and RESULTS (hyphenated; no `/`).
+  ///
+  /// Hyphens keep [ProfileReportKey] round-trips reversible (the encoder
+  /// still maps `/` ↔ `_` for legacy keys).
+  final String id;
 
   /// List length tier.
   final FeedListSize listSize;
@@ -213,81 +164,75 @@ final class ProfileMatrixCell {
   /// Ordinary vs complicated corpus / settle policy.
   final FeedComplexity complexity;
 
-  /// Stable cell id for logs and RESULTS (`list/speed/complexity`).
-  String get id => '${listSize.id}/${scroll.id}/${complexity.id}';
+  /// When true, [pumpAndSettle] before scroll (warm hit path).
+  final bool warmSettle;
 
-  /// TimelineSummary report key for the ours paint path.
-  String get reportKey => ProfileReportKey.encode(adapter: 'ours', cellId: id);
+  /// TimelineSummary report key for [adapter] under this cell.
+  String reportKeyFor(String adapter) =>
+      ProfileReportKey.encode(adapter: adapter, cellId: id);
 
-  /// Day-to-day subset: medium × medium × ordinary + complicated.
-  static const List<ProfileMatrixCell> defaultSubset = <ProfileMatrixCell>[
-    ProfileMatrixCell(
-      listSize: FeedListSize.medium,
-      scroll: ScrollIntensity.medium,
-      complexity: FeedComplexity.ordinary,
-    ),
-    ProfileMatrixCell(
-      listSize: FeedListSize.medium,
-      scroll: ScrollIntensity.medium,
-      complexity: FeedComplexity.complicated,
-    ),
+  /// Host-feel / hit path: medium list, medium fling, ordinary warm settle.
+  static const ProfileMatrixCell warmScroll = ProfileMatrixCell(
+    id: 'warm-scroll',
+    listSize: FeedListSize.medium,
+    scroll: ScrollIntensity.medium,
+    complexity: FeedComplexity.ordinary,
+    warmSettle: true,
+  );
+
+  /// First-pass misses: medium list, medium fling, complicated corpus.
+  static const ProfileMatrixCell coldScroll = ProfileMatrixCell(
+    id: 'cold-scroll',
+    listSize: FeedListSize.medium,
+    scroll: ScrollIntensity.medium,
+    complexity: FeedComplexity.complicated,
+    warmSettle: false,
+  );
+
+  /// Jank / coalesce pressure: large list, fast fling, complicated corpus.
+  static const ProfileMatrixCell pressureScroll = ProfileMatrixCell(
+    id: 'pressure-scroll',
+    listSize: FeedListSize.large,
+    scroll: ScrollIntensity.fast,
+    complexity: FeedComplexity.complicated,
+    warmSettle: false,
+  );
+
+  /// Default day-to-day catalog (all three curated cells).
+  static const List<ProfileMatrixCell> curated = <ProfileMatrixCell>[
+    warmScroll,
+    coldScroll,
+    pressureScroll,
   ];
 
-  /// Full factorial: every list × speed × complexity combination (18 cells).
-  static List<ProfileMatrixCell> get fullFactorial => <ProfileMatrixCell>[
-    for (final list in FeedListSize.values)
-      for (final speed in ScrollIntensity.values)
-        for (final complexity in FeedComplexity.values)
-          ProfileMatrixCell(
-            listSize: list,
-            scroll: speed,
-            complexity: complexity,
-          ),
-  ];
-
-  /// Parses `list/speed/complexity` or throws [ArgumentError].
+  /// Parses a curated cell id or throws [ArgumentError].
   factory ProfileMatrixCell.parseId(String raw) {
-    final parts = raw.split('/');
-    if (parts.length != 3) {
-      throw ArgumentError.value(
-        raw,
-        'cellId',
-        'Expected list/speed/complexity',
-      );
+    for (final cell in curated) {
+      if (cell.id == raw) return cell;
     }
-    return ProfileMatrixCell(
-      listSize: FeedListSize.parse(parts[0]),
-      scroll: ScrollIntensity.parse(parts[1]),
-      complexity: FeedComplexity.parse(parts[2]),
+    throw ArgumentError.value(
+      raw,
+      'cellId',
+      'Expected one of: ${curated.map((c) => c.id).join(', ')}',
     );
   }
 
   /// Resolves which cells a harness run should execute.
   ///
-  /// [cellId] wins when set (single cell). Otherwise [mode] selects
-  /// [defaultSubset] or [fullFactorial].
-  static List<ProfileMatrixCell> resolveCells({
-    String? cellId,
-    MatrixRunMode mode = MatrixRunMode.subset,
-  }) {
+  /// [cellId] wins when set (single cell). Otherwise returns [curated].
+  static List<ProfileMatrixCell> resolveCells({String? cellId}) {
     if (cellId case final id? when id.isNotEmpty) {
       return <ProfileMatrixCell>[ProfileMatrixCell.parseId(id)];
     }
-    return switch (mode) {
-      MatrixRunMode.subset => defaultSubset,
-      MatrixRunMode.full => fullFactorial,
-    };
+    return curated;
   }
 
   @override
   bool operator ==(Object other) =>
-      other is ProfileMatrixCell &&
-      other.listSize == listSize &&
-      other.scroll == scroll &&
-      other.complexity == complexity;
+      other is ProfileMatrixCell && other.id == id;
 
   @override
-  int get hashCode => Object.hash(listSize, scroll, complexity);
+  int get hashCode => id.hashCode;
 
   @override
   String toString() => 'ProfileMatrixCell($id)';

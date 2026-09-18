@@ -4,7 +4,7 @@
   `ImageBytesRequest.onBytesProgress` / `HttpBytesFetcher.getBytes(onBytesProgress:)`
   report cumulative bytes (and total when Content-Length is known) while the
   HTTP body is read on a network miss. Durable cache hits do not synthesize
-  mid-download progress. Resolve stays a single `Future<Uint8List>` — no public
+  mid-download progress. Resolve stays a single `Future<Uint8List>`. No public
   streaming resolve API; coalesce and `ImageCacheKey` identity are unchanged.
 
 ## 0.0.2
@@ -21,13 +21,13 @@
 - **FIXED**: VM blob isolate death fails in-flight RPCs with `StateError`
   instead of hanging, drops the dead worker so later ops can respawn, and
   keeps the exclusive mutate gate from stalling on a dead worker.
-- **FIXED**: Ladder soft-failure hygiene — empty durable writes are not retained
+- **FIXED**: Ladder soft-failure hygiene: empty durable writes are not retained
   (treated as eviction); sticky empty rows scrub on read; non-positive
   `maxEntries` / `maxBytes` assert; throwing diagnostics `onEvent` is swallowed
   so write-through catch cannot become an unhandled async error; HTTP timeout
   uses `AbortableRequest` (releases sockets when the client honors abort) while
   pool-wait before a slot remains intentionally unbounded.
-- **FIXED**: Ladder identity — coalesce uses `ImageCacheKey` (no ambiguous
+- **FIXED**: Ladder identity: coalesce uses `ImageCacheKey` (no ambiguous
   `url|headers` join); `fromUrl` fingerprints `Uri.base.resolve` canonical URLs
   with length-prefixed material; explicit `cacheKey` documented as full identity
   (headers on the wire do not silently change the key).
@@ -43,6 +43,6 @@
 
 ## 0.0.1
 
-- **ADDED**: Initial standalone release — durable remote image bytes with RAM
+- **ADDED**: Initial standalone release: durable remote image bytes with RAM
   meta mirror, platform blob stores (VM files / web Cache+OPFS), resolve
   ladder, store microbenches, and docs.

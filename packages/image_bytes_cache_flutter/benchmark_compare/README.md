@@ -1,204 +1,151 @@
-# image_bytes_cache — three-way bytes compare + profile matrix
+# image_bytes_cache: three-way raster compare
 
 Standalone, non-published package under
-`image_bytes_cache_flutter/benchmark_compare`. Two measurement lanes:
+`image_bytes_cache_flutter/benchmark_compare`. Two lanes:
 
-1. **URL → bytes ready** — ours vs
+1. **URL → bytes ready** (secondary). Slim four-row tables: ours vs
    [`cached_network_image_ce`](https://pub.dev/packages/cached_network_image_ce)
    (Hive) vs stock
    [`cached_network_image`](https://pub.dev/packages/cached_network_image)
    (sqflite) on a shared adapter port.
-2. **Profile scroll-pressure matrix** — real-device `--profile` scroll of a
-   product-like list painted through `image_bytes_cache_flutter`
-   (`CachedNetworkSvgImage`), capturing TimelineSummary frame build/raster
-   per named cell (`list/speed/complexity`). Ours-only; competitor
-   paint columns only when fair.
+2. **Raster paint + profile** (primary). Same PNG corpus through ours
+   (`CachedNetworkBytesImage`), CE, and stock (`CachedNetworkImage`):
+   - side-by-side integration correctness (competitors do not ship this)
+   - curated scroll cells with TimelineSummary (three stacks × three cells)
 
-Competitor deps live **only** here — never on the core or flutter package
-pubspecs.
+Competitor deps live only here. Never on the core or flutter package pubspecs.
 
 Harvested runs: [`RESULTS.md`](RESULTS.md).
 
-**Neither lane is a CI merge gate.** Core store RESULT / bytes tables remain
-the doctrine proof; the profile matrix is additive host-feel evidence.
+Neither lane is a CI merge gate. Core store benches and the slim bytes tables
+are the durable proof. Profile numbers are phone- or browser-specific frame
+timings on top.
 
 ## Layout
 
-| Path                                     | Role                                                                    |
-| ---------------------------------------- | ----------------------------------------------------------------------- |
-| `lib/corpus.dart`                        | Synthetic URLs + size-class payloads (small / ≥64 KiB) for bytes tables |
-| `lib/feed_corpus.dart`                   | Paintable SVG URLs/bytes (ordinary vs complicated)                      |
-| `lib/profile_matrix.dart`                | List × scroll × complexity cells, recipes, report keys, subset/full     |
-| `lib/adapter.dart`                       | `IBytesReadyAdapter` port                                               |
-| `lib/adapters/`                          | Ours (resolver + durable VM), CE Hive, stock CNI                        |
-| `lib/scenarios.dart`                     | Cold miss, warm hit, same-URL burst, many distinct keys                 |
-| `lib/measure.dart`                       | Warmup + calibrate + min-of-batches                                     |
-| `lib/timeline_summary_table.dart`        | TimelineSummary JSON → Markdown (named cells)                           |
-| `benchmark/bytes_compare.dart`           | Prints Markdown absolute + ratio tables                                 |
-| `integration_test/scroll_perf_test.dart` | Profile matrix feed + TimelineSummary                                   |
-| `test_driver/perf_driver.dart`           | Writes `build/integration_response_data.json`                           |
-| `tool/summarize_timeline.dart`           | Paste-ready profile Markdown                                            |
-| `test/adapter_port_test.dart`            | Correctness at the adapter seam                                         |
-| `test/bytes_compare_test.dart`           | Runs the timed compare (not a CI gate)                                  |
-| `test/feed_corpus_test.dart`             | Feed SVG corpus contracts                                               |
-| `test/feed_corpus_complexity_test.dart`  | Ordinary vs complicated observable differences                          |
-| `test/profile_matrix_test.dart`          | Cell ids, subset/full, gesture recipes                                  |
-| `test/timeline_summary_table_test.dart`  | Summarize formatter                                                     |
+| Path | Role |
+| ---- | ---- |
+| `lib/corpus.dart` | Synthetic URLs + size-class payloads for bytes tables |
+| `lib/feed_corpus.dart` | Paintable PNG URLs/bytes (ordinary vs complicated) |
+| `lib/profile_matrix.dart` | Curated cells: `warm-scroll` / `cold-scroll` / `pressure-scroll` |
+| `lib/adapter.dart` | `IBytesReadyAdapter` port |
+| `lib/paint_adapter.dart` | `IPaintFeedAdapter` port |
+| `lib/adapters/` | Bytes + paint factories for ours / CE / stock |
+| `lib/scenarios.dart` | Cold miss, warm hit, same-URL burst, many distinct keys (small) |
+| `lib/measure.dart` | Warmup + calibrate + min-of-batches |
+| `lib/timeline_summary_table.dart` | TimelineSummary JSON → Markdown |
+| `benchmark/bytes_compare.dart` | Prints Markdown absolute + ratio tables |
+| `integration_test/paint_compare_test.dart` | Three-way paint correctness |
+| `integration_test/scroll_perf_test.dart` | Profile cells × three paint adapters |
+| `test_driver/perf_driver.dart` | Writes `build/integration_response_data.json` |
+| `tool/summarize_timeline.dart` | Paste-ready profile Markdown |
+| `test/adapter_port_test.dart` | Bytes seam correctness |
+| `test/paint_adapter_port_test.dart` | Paint seam (widget type; no FakeAsync pump) |
+| `test/bytes_compare_test.dart` | Timed bytes compare (not a CI gate) |
+| `test/feed_corpus_*.dart` | PNG corpus contracts |
+| `test/profile_matrix_test.dart` | Curated cell ids / recipes |
+| `test/timeline_summary_table_test.dart` | Summarize formatter |
 
-## Running — bytes compare
+## Running: bytes compare
 
 ```shell
 cd packages/image_bytes_cache_flutter/benchmark_compare
 flutter pub get
 
-# Seam correctness (fast)
 flutter test test/adapter_port_test.dart
-
-# Head-to-head tables (slow; machine-local)
 flutter test test/bytes_compare_test.dart
 ```
 
 Paste the printed Markdown into [`RESULTS.md`](RESULTS.md). Absolute
-microseconds are **not** portable — use the ratio table.
+microseconds are not portable. Use the ratio table.
 
-## Running — profile scroll-pressure matrix (optional, real device)
+Rows (small corpus only): `cold_miss_small`, `warm_hit_small`,
+`same_url_burst_small`, `many_distinct_keys_small`.
 
-Profile timings need a **real device or desktop runner** and GPU raster. They
-are device-specific, **not** a merge gate, and do **not** replace core store
-microbenches or the bytes doctrine tables.
+## Running: paint integration correctness
 
 ```shell
-cd packages/image_bytes_cache_flutter/benchmark_compare
-flutter pub get
+flutter test integration_test/paint_compare_test.dart -d flutter-tester
+# or a real device / desktop runner when preferred
 
-# One-time platform runner (gitignored scaffolding):
-flutter create --platforms=linux \
-  --project-name image_bytes_cache_benchmark_compare .
+# Web (ChromeDriver must already listen on 4444):
+#   chromedriver --port=4444
+flutter drive --driver=test_driver/perf_driver.dart \
+  --target=integration_test/paint_compare_test.dart \
+  -d web-server --browser-name=chrome --driver-port=4444
+```
 
-# Default subset: medium/medium/ordinary + medium/medium/complicated
+Cold / warm / short feed / empty-then-reload for ours, ce_hive, and stock_cni
+on the shared PNG corpus. On web, stock uses cache_manager's IndexedDB path
+(not sqflite); CE uses Hive/IndexedDB. Not a merge gate.
+
+Do not pump real durable resolves under `testWidgets` FakeAsync. Isolate ladder
++ HTTP deadlocks. Unit paint tests only assert widget types; live paint lives
+in `integration_test/`.
+
+## Running: profile scroll (optional)
+
+Prefer a real device with `--profile` for the Android harvest in RESULTS.
+Chrome web drive adds correctness and noisier debug timings.
+
+```shell
+# Device / desktop profile:
 flutter drive \
   --driver=test_driver/perf_driver.dart \
   --target=integration_test/scroll_perf_test.dart \
-  --profile --no-dds -d linux
+  --profile --no-dds -d <device>
+
+# Chrome web (ChromeDriver on :4444):
+flutter drive \
+  --driver=test_driver/perf_driver.dart \
+  --target=integration_test/scroll_perf_test.dart \
+  -d web-server --browser-name=chrome --driver-port=4444
 
 dart run tool/summarize_timeline.dart
-# -> reads build/integration_response_data.json
-# -> one Markdown table per named cell
 ```
 
-Swap `-d linux` for another device when preferred.
+### Curated cells
 
-### Matrix defines
-
-| Define   | Values / example              | Effect                                                                 |
-| -------- | ----------------------------- | ---------------------------------------------------------------------- |
-| `MATRIX` | `subset` (default) / `full`   | `subset` = medium × medium × ordinary+complicated; `full` = 18 cells   |
-| `CELL`   | e.g. `large/fast/complicated` | Single-cell override (wins over `MATRIX`)                              |
+| Cell id | List | Scroll | Complexity | Settle |
+| ------- | ---- | ------ | ---------- | ------ |
+| `warm-scroll` | medium (48) | medium | ordinary | warm `pumpAndSettle` |
+| `cold-scroll` | medium (48) | medium | complicated | first-pass misses |
+| `pressure-scroll` | large (120) | fast | complicated | first-pass misses |
 
 ```shell
-# Full factorial (opt-in; long)
-flutter drive --driver=test_driver/perf_driver.dart \
-  --target=integration_test/scroll_perf_test.dart --profile --no-dds -d linux \
-  --dart-define=MATRIX=full
-
-# One pressure cell
-flutter drive --driver=test_driver/perf_driver.dart \
-  --target=integration_test/scroll_perf_test.dart --profile --no-dds -d linux \
-  --dart-define=CELL=large/fast/complicated
+# Single cell
+flutter drive ... --dart-define=CELL=warm-scroll
 ```
 
-### Locked dimensions
+Optional density defines: `FEED=mixed|prose`, `ITEM_MODE=natural|fixed`.
 
-| Axis         | Tokens                         | Concrete contract                                                                                                                                 |
-| ------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| List size    | `small` / `medium` / `large`   | 24 / 48 / 120 items                                                                                                                               |
-| Scroll       | `slow` / `medium` / `fast`     | drag `(0,-400)` @ 800 px/s × 4 passes; `(0,-600)` @ 2000 × 6; `(0,-900)` @ 4500 × 8 (down then up each pass)                                      |
-| Complexity   | `ordinary` / `complicated`     | **ordinary:** 4 unique small SVGs, warm `pumpAndSettle` before scroll. **complicated:** many distinct keys, mixed under/over 64 KiB, 3-in-a-row coalesce bursts, layout-only settle (first-pass misses), 2 ms MockClient delay |
-
-Cell id in logs / RESULTS: `list/speed/complexity` (e.g. `large/fast/complicated`).
-
-### Density controls (orthogonal)
-
-| Define      | Values                        | Effect                                                                                                       |
-| ----------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `FEED`      | `mixed` (default) / `prose`   | `mixed` uses ordinary/complicated corpus; `prose` repeats one identical payload (content-per-frame control)  |
-| `ITEM_MODE` | `natural` (default) / `fixed` | `fixed` clips every row to a constant height so fling distance crosses the same item count                   |
-
-```shell
-flutter drive --driver=test_driver/perf_driver.dart \
-  --target=integration_test/scroll_perf_test.dart --profile --no-dds -d linux \
-  --dart-define=FEED=prose --dart-define=ITEM_MODE=fixed
-```
-
-## Methodology & fairness
+## Methodology and fairness
 
 ### Bytes tables
 
-**Corpus.** Deterministic fill patterns (`small` = 4 KiB, `large` = 96 KiB)
-served by an in-process `MockClient`. No public CDN. Every adapter resolves
-the same `https://bench.invalid/…` URLs.
+**Corpus.** Deterministic fill patterns (`small` = 4 KiB) served by an
+in-process `MockClient`. No public CDN.
 
-**Primary table.** Bytes ready only — `getBytes` / resolver / `CacheManager`
-file path. **No** decode, **no** Flutter `ImageCache`, **no** ImageProvider
-paint (those belong in the profile-scroll lane).
+**Primary table.** Bytes ready only. No decode / ImageProvider paint.
 
-**Adapters.**
+**Adapters.** Temp roots, MockClient, stock `sqflite_common_ffi`. Emptied
+between rows.
 
-| Stack     | Bytes path                                             | HTTP control                            | Store isolation                              |
-| --------- | ------------------------------------------------------ | --------------------------------------- | -------------------------------------------- |
-| ours      | `ImageBytesResolver` + durable `ImageBytesCache.open`  | `HttpBytesFetcher` + `MockClient`       | Temp directory; emptied between rows         |
-| CE Hive   | `DefaultCacheManager.getFileStream` → `FileInfo` bytes | `httpClientFactory` → same `MockClient` | Temp cache + Hive dirs                       |
-| stock CNI | `CacheManager.getSingleFile` → bytes                   | `HttpFileService(httpClient: …)`        | Temp root + `CacheObjectProvider` `.db` path |
+### Paint / profile
 
-**Lifecycle.** Adapters are reused across rows (reopened only when a scenario’s
-HTTP delay changes) and emptied between scenarios. Stock CNI close waits past
-`flutter_cache_manager`’s ~10s cleanup timer so dispose does not race a closed
-sqflite handle.
+**Corpus.** Paintable PNG on `bench.invalid/feed/...` (`lib/feed_corpus.dart`)
+via `package:image` (level-0 encode so the ≥64 KiB cut is real file size).
 
-**Do not** assert Hive box names, SQLite query plans, or private lock maps —
-adapters stay at the bytes-ready port. If a stack cannot expose bytes fairly
-on a platform, the cell is **N/A** with a reason (never a paint-inclusive lie).
+**Paint path.** `IPaintFeedAdapter`:
 
-**Interpreting ratios.** `× = adapter_us / ours_us`. Values above 1.00 mean
-slower than ours on **this** machine/run. Residual unfairness (e.g. CE
-materializing a `File` from Hive+disk, stock reading through sqflite + file
-IO, ours RAM-meta hit after durable write-through) is inherent to the public
-APIs — document it, do not normalize it away in the table.
+| Stack | Widget | Notes |
+| ----- | ------ | ----- |
+| ours | `CachedNetworkBytesImage` | injected resolver |
+| CE / stock | `CachedNetworkImage` | injected `cacheManager`; zero fade durations |
 
-### Profile matrix
+Same list layout, decode pixel budget, and corpus per cell. Flutter
+`imageCache` cleared between cold cells. On web, competitors use
+`ImageRenderMethodForWeb.HttpGet` so MockClient stays in path.
 
-**Corpus.** Paintable SVG on `bench.invalid/feed/…` (`lib/feed_corpus.dart`).
-Still no public CDN — `MockClient` only. Ordinary vs complicated rules are in
-the table above.
-
-**Paint path.** Rows use `CachedNetworkSvgImage` with an injected
-`ImageBytesResolver` over a durable temp store + controlled HTTP. Light list
-chrome (avatar + label) is in scope so rebuild/layout cost is realistic.
-
-**Metrics.** TimelineSummary frame build/raster avg / p90 / p99 / worst, missed
-frame counts, frame count — **per named cell**. Summarize → Markdown; harvest
-under a separate RESULTS section from the bytes tables.
-
-**Fairness.** Decode/paint is **in scope** here (host claim). Same feed length,
-gesture recipe, corpus, and density mode per cell. Ours-only is intentional
-until competitor paint adapters can consume the SVG corpus fairly — report
-missing columns as `-` / N/A with that reason, not a forced three-way paint
-table.
-
-**Interpreting percentiles vs bytes ratios.** Profile numbers are machine- and
-device-specific frame build/raster timings under GPU raster. They answer “how
-does the feed feel under this pressure cell?” Bytes-table ratios answer “how
-fast is URL → bytes ready on the durable path?” Do not treat profile
-percentiles as portable absolute milliseconds, and do not substitute them for
-(or against) core store microbench / bytes-compare ratios — different seams,
-different claims.
-
-## Summarize
-
-```shell
-dart run tool/summarize_timeline.dart
-dart run tool/summarize_timeline.dart --cell medium/medium/ordinary
-```
-
-Discovers `scroll_ours__list_speed_complexity` keys and prints one table per
-cell id (`list/speed/complexity`).
+**Metrics.** TimelineSummary build/raster percentiles per
+`scroll_<adapter>__<cell-id>`. Summarize prints three-way columns when present.

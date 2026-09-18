@@ -5,26 +5,26 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Flutter paint adapters for
-[`image_bytes_cache`](../image_bytes_cache/). Resolve remote image **bytes**
-through the core ladder, then paint. This package ships raster
-`CachedNetworkBytesImageProvider` / `CachedNetworkBytesImage` and SVG
-`CachedNetworkSvgImage`. Durable storage stays in core.
+[`image_bytes_cache`](../image_bytes_cache/). Resolve remote image bytes through
+the core ladder, then paint. Ships raster `CachedNetworkBytesImageProvider` /
+`CachedNetworkBytesImage` and SVG `CachedNetworkSvgImage`. Durable storage stays
+in core.
 
 Widgets here do not open files, sockets, or durable stores. Call
 `ImageBytesCache.open` / `configure` on the core package once before paint.
 
-## 🌟 Features
+## Features
 
-- **🪶 Thin paint layer**: Depends on `IImageBytesResolver` / `ImageCacheKey`
-  only. No second resolve tree in widgets.
-- **🖼️ Raster**: Provider for any `ImageProvider` slot (`Image`,
-  `DecorationImage`, …) plus a thin `Image`-shaped widget. Optional display-
-  sized decode for Flutter `ImageCache`; durable keys stay `ImageCacheKey`.
-- **✏️ SVG**: `CachedNetworkSvgImage` with sealed load state, optional bounded
+- **Thin paint layer.** Depends on `IImageBytesResolver` / `ImageCacheKey` only.
+  No second resolve tree in widgets.
+- **Raster.** Provider for any `ImageProvider` slot (`Image`, `DecorationImage`,
+  ...) plus a thin `Image`-shaped widget. Optional display-sized decode for
+  Flutter `ImageCache`; durable keys stay `ImageCacheKey`.
+- **SVG.** `CachedNetworkSvgImage` with sealed load state, optional bounded
   `PageStorage` restore, and soft failures via `errorBuilder` / `onError`.
-- **🧪 Testable**: Inject an `IImageBytesResolver` in tests.
+- **Testable.** Inject an `IImageBytesResolver` in tests.
 
-## 📦 Installation
+## Installation
 
 ```yaml
 dependencies:
@@ -33,7 +33,7 @@ dependencies:
 
 Then `flutter pub get`.
 
-## 🚀 Quick Start
+## Quick start
 
 ### 1. Bootstrap the core cache
 
@@ -64,7 +64,7 @@ import 'package:image_bytes_cache_flutter/image_bytes_cache_flutter.dart';
 Image(
   image: CachedNetworkBytesImageProvider(
     'https://cdn.example.com/photo.jpg',
-    headers: const {'Authorization': 'Bearer …'},
+    headers: const {'Authorization': 'Bearer ...'},
   ),
   loadingBuilder: (context, child, progress) {
     if (progress == null) return child;
@@ -132,7 +132,21 @@ CachedNetworkSvgImage(
 Defaults: shared resolver, `BoxFit.contain`, empty box when `errorBuilder` is
 omitted.
 
-## 📱 Platform Support
+## Performance
+
+Bytes-ready ratios and three-way scroll tables live in the core
+[`README`](../image_bytes_cache/README.md#performance) and
+[`benchmark_compare/RESULTS.md`](benchmark_compare/RESULTS.md).
+
+On a Galaxy S938B `pressure-scroll` run, `CachedNetworkBytesImage` missed 0
+raster frames while CE / stock missed 4 / 8. Worst raster was about 2.6 ms vs
+29-32 ms. The tradeoff is a slightly heavier frame-build path
+(`StatefulWidget` + `loadingBuilder`).
+
+Chrome web debug drive (same cells): pressure missed raster 0 / 0 / 0; build
+averages about 4 ms across stacks. See RESULTS for the full tables.
+
+## Platform support
 
 Same targets as Flutter and the core package: Android, iOS, Web, Windows,
 macOS, Linux. Persistence behavior is defined by core `ImageBytesCache.open`.
@@ -146,7 +160,8 @@ flutter test
 flutter analyze
 ```
 
-Core store / ladder benches and Chrome open smoke stay in
+Compare package (bytes + paint + profile drive):
+[`benchmark_compare/`](benchmark_compare/). Core store / ladder benches stay in
 [`../image_bytes_cache/`](../image_bytes_cache/).
 
 Contributor orientation: [`AGENTS.md`](AGENTS.md), [`CONTEXT.md`](CONTEXT.md),
@@ -160,9 +175,8 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 - [Zulufov Emil](https://github.com/itsezlife)
 
-## 📝 License
+## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file
-for details.
+MIT. See [LICENSE](LICENSE).
 
 Copyright (c) 2026 Zulufov Emil <emilzulufov566@gmail.com>

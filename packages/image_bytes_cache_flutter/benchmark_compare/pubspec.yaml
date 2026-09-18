@@ -29,12 +29,14 @@ dependencies:
   # Competitors — compare-only.
   cached_network_image_ce: ^4.10.0
   cached_network_image: ^3.4.1
+  cached_network_image_platform_interface: ^4.1.1
   flutter_cache_manager: ^3.4.1
   sqflite_common_ffi: ^2.3.4
 
   file: ">=7.0.0 <8.0.0"
   http: ^1.6.0
   path: ^1.9.1
+  image: ^4.5.4
 
 dev_dependencies:
   flutter_test:

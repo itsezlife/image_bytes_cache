@@ -1,11 +1,11 @@
 // ignore_for_file: avoid_print
 //
 // Formats profile-mode image-feed TimelineSummary JSON into Markdown.
-// Discovers named matrix cells (`scroll_ours__large_fast_complicated` →
-// `large/fast/complicated`) and prints one table per cell.
+// Discovers curated cells (`scroll_ours__warm-scroll` → `warm-scroll`) and
+// prints one table per cell with discovered adapter columns.
 //
 //   dart run tool/summarize_timeline.dart
-//   dart run tool/summarize_timeline.dart --cell medium/medium/ordinary
+//   dart run tool/summarize_timeline.dart --cell warm-scroll
 
 import 'dart:convert';
 import 'dart:io';
@@ -13,6 +13,12 @@ import 'dart:io';
 import 'package:image_bytes_cache_benchmark_compare/timeline_summary_table.dart';
 
 const String _kInput = 'build/integration_response_data.json';
+
+const List<String> _kPreferredAdapters = <String>[
+  'ours',
+  'ce_hive',
+  'stock_cni',
+];
 
 void main(List<String> args) {
   String? cellId;
@@ -31,8 +37,8 @@ void main(List<String> args) {
       '  flutter drive --driver=test_driver/perf_driver.dart '
       '--target=integration_test/scroll_perf_test.dart '
       '--profile --no-dds -d <device>\n'
-      'Default MATRIX=subset (medium/medium/ordinary+complicated). '
-      'Full factorial: --dart-define=MATRIX=full',
+      'Default cells: warm-scroll, cold-scroll, pressure-scroll. '
+      'Single cell: --dart-define=CELL=warm-scroll',
     );
     exitCode = 1;
     return;
@@ -44,7 +50,7 @@ void main(List<String> args) {
       formatAllTimelineSummariesMarkdown(
         map,
         cellId: cellId,
-        preferredAdapters: const <String>['ours'],
+        preferredAdapters: _kPreferredAdapters,
       ),
     );
     return;
@@ -54,7 +60,7 @@ void main(List<String> args) {
       formatAllTimelineSummariesMarkdown(
         map.cast<String, Object?>(),
         cellId: cellId,
-        preferredAdapters: const <String>['ours'],
+        preferredAdapters: _kPreferredAdapters,
       ),
     );
     return;

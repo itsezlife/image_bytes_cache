@@ -11,8 +11,8 @@ High-signal orientation for LLMs/agents working in
   `CachedNetworkBytesImageProvider` / `CachedNetworkBytesImage`, and SVG
   `CachedNetworkSvgImage`.
 - Widget / provider tests for those adapters.
-- UI/profile benches and flutter-side `benchmark_compare` (head-to-head bytes
-  tables when fair, profile feed, scroll-pressure matrix) under
+- UI/profile benches and flutter-side `benchmark_compare` (slim bytes tables,
+  three-way raster paint integration, curated scroll-pressure cells) under
   [`benchmark_compare/`](benchmark_compare/) in this package — never under
   pure-Dart core.
 
@@ -64,23 +64,22 @@ Core store microbenches and Chrome open smoke stay in
 [`../image_bytes_cache/`](../image_bytes_cache/AGENTS.md) (Chrome open is a CI
 merge gate on the core package).
 
-Three-way bytes compare and profile scroll-pressure matrix (optional
-real-device `--profile`, not a merge gate):
+Three-way bytes compare, paint integration, and curated profile scroll
+(optional real-device `--profile`, not a merge gate):
 [`benchmark_compare/`](benchmark_compare/).
 
-Profile matrix defines (details + recipes in
+Profile / paint defines (details in
 [`benchmark_compare/README.md`](benchmark_compare/README.md)):
 
-| Define      | Values                         | Role |
-| ----------- | ------------------------------ | ---- |
-| `MATRIX`    | `subset` (default) / `full`    | Day-to-day two cells vs full 18-cell factorial |
-| `CELL`      | `list/speed/complexity`        | Optional single-cell override |
-| `FEED`      | `mixed` / `prose`              | Complexity corpus vs repeated payload |
-| `ITEM_MODE` | `natural` / `fixed`            | Natural row height vs fixed clip |
+| Define      | Values                                      | Role |
+| ----------- | ------------------------------------------- | ---- |
+| `CELL`      | `warm-scroll` / `cold-scroll` / `pressure-scroll` | Optional single-cell override |
+| `FEED`      | `mixed` / `prose`                           | Complexity corpus vs repeated payload |
+| `ITEM_MODE` | `natural` / `fixed`                         | Natural row height vs fixed clip |
 
-Cell ids look like `large/fast/complicated`. Harvest with
-`dart run tool/summarize_timeline.dart` into `RESULTS.md`. Not a merge gate;
-does not replace core store or bytes-table ratios.
+Default runs all three curated cells × ours / CE / stock on a PNG corpus.
+Harvest with `dart run tool/summarize_timeline.dart` into `RESULTS.md`. Not a
+merge gate; does not replace core store or bytes-table ratios.
 
 ## The docs
 
