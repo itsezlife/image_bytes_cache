@@ -339,6 +339,39 @@ void main() {
       );
       await expectLater(cache.prune(), throwsA(isA<StateError>()));
     });
+
+    test('commit failure rolls RAM back — no optimistic durable hit', () async {
+      const priorKey = ImageCacheKey('prior');
+      const failedKey = ImageCacheKey('failed');
+      final priorBytes = Uint8List.fromList([1, 1]);
+      final failedBytes = Uint8List.fromList([2, 2, 2]);
+
+      await cache.write(priorKey, priorBytes);
+      index.commitError = StateError('durable index commit failed');
+
+      await expectLater(cache.write(failedKey, failedBytes), throwsA(isA<StateError>()));
+
+      // Must not treat the optimistic RAM put as a durable hit.
+      expect(await cache.read(failedKey), isNull);
+      expect(index.records.containsKey(failedKey.value), isFalse);
+      // Last good commit snapshot stays readable.
+      expect(await cache.read(priorKey), priorBytes);
+      expect(index.records.containsKey(priorKey.value), isTrue);
+    });
+
+    test('commit failure on evict restores the index row', () async {
+      const key = ImageCacheKey('keep');
+      final bytes = Uint8List.fromList([7]);
+      await cache.write(key, bytes);
+      index.commitError = StateError('durable index commit failed');
+
+      await expectLater(cache.evict(key), throwsA(isA<StateError>()));
+
+      // Blob may already be gone. Index must not stay deleted after a failed
+      // commit as if durable eviction had succeeded. Restore last-good meta
+      // so the store does not claim the eviction completed.
+      expect(index.records.containsKey(key.value), isTrue);
+    });
   });
 }
 
@@ -347,6 +380,7 @@ final class _FakeIndex implements IImageBytesIndex {
   int putCount = 0;
   int commitCount = 0;
   Duration opDelay = Duration.zero;
+  Error? commitError;
 
   Future<void> _delay() async {
     if (opDelay > Duration.zero) {
@@ -382,6 +416,10 @@ final class _FakeIndex implements IImageBytesIndex {
   @override
   Future<void> commit() async {
     await _delay();
+    final error = commitError;
+    if (error != null) {
+      throw error;
+    }
     commitCount++;
   }
 }

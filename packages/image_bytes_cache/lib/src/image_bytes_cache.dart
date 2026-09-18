@@ -404,7 +404,7 @@ abstract interface class IImageBytesCache {
 ///
 /// ## Mutate epoch
 ///
-/// The following operations share a single, exclusive domain (ensuring all readers
+/// The following operations share a single, exclusive domain (all readers
 /// complete first):
 /// - [write]
 /// - [evict]
@@ -414,14 +414,29 @@ abstract interface class IImageBytesCache {
 /// - [close]
 ///
 /// Within a mutate epoch, the following steps are performed:
-///  1. Flush soft access into the RAM mirror.
-///  2. Apply puts, deletes, and capacity trim in RAM (including blob I/O).
-///  3. Call [IImageBytesIndex.commit] **once**.
-///  4. For [prune] (and explicit [reclaimOrphans]), run orphan blob reclamation.
+///  1. Snapshot the RAM mirror (last-good meta for rollback).
+///  2. Flush soft access into the RAM mirror.
+///  3. Apply puts, deletes, and capacity trim in RAM (including blob I/O).
+///  4. Call [IImageBytesIndex.commit] **once**.
+///  5. For [prune] (and explicit [reclaimOrphans]), run orphan blob reclamation.
 ///
 /// Without that single-commit rule, a soft-LRU flush that touches N keys would
 /// rewrite the durable index N times. Without the shared exclusive domain,
 /// orphan reclaim can delete a blob mid-write.
+///
+/// ## Commit failure
+///
+/// If [IImageBytesIndex.commit] throws after the RAM (and possibly blob) half
+/// has already mutated, the brain rolls the RAM mirror back to the pre-epoch
+/// snapshot and rethrows. Later in-process [read]s must not treat the
+/// optimistic put as a durable hit. Blob halves are not rolled back. A failed
+/// write may leave an orphan blob. A failed commit after trim, evict, or TTL
+/// may put index rows back whose payloads were already deleted; the next read
+/// heals those as index-without-blob, and those victim bodies are not
+/// recovered. We chose that over "write failed but RAM hit" and over
+/// fail-closing the whole instance on a transient durable-meta error.
+/// [ImageBytesResolver] write-through still sees the thrown [write] and
+/// reports via diagnostics without failing a successful network resolve.
 ///
 /// After [close], further operations throw [StateError].
 final class IndexedImageBytesCache implements IImageBytesCache {
@@ -494,6 +509,7 @@ final class IndexedImageBytesCache implements IImageBytesCache {
       _ReadProbeMiss() => null,
       _ReadProbeNeedsDelete() => _runExclusive(() async {
         _ensureOpen();
+        final preEpoch = await _captureIndexSnapshot();
         // Re-check under the exclusive gate: a write may have refreshed the
         // entry after the shared probe decided it was expired.
         final record = await _index.get(key);
@@ -504,14 +520,15 @@ final class IndexedImageBytesCache implements IImageBytesCache {
           null => false,
         };
         if (!expired) {
-          return _finishSharedHit(key, now);
+          return _finishSharedHit(key, now, preEpoch);
         }
         await _deleteBoth(key);
-        await _index.commit();
+        await _commitOrRollback(preEpoch);
         return null;
       }),
       _ReadProbeNeedsIndexDelete() => _runExclusive(() async {
         _ensureOpen();
+        final preEpoch = await _captureIndexSnapshot();
         // Re-check: a write may have restored the blob after the shared probe.
         final record = await _index.get(key);
         if (record == null) return null;
@@ -522,19 +539,23 @@ final class IndexedImageBytesCache implements IImageBytesCache {
         }
         _pendingAccess.remove(key);
         await _index.delete(key);
-        await _index.commit();
+        await _commitOrRollback(preEpoch);
         return null;
       }),
     };
   }
 
   /// Blob hit after meta was already confirmed present and not expired.
-  Future<Uint8List?> _finishSharedHit(ImageCacheKey key, DateTime now) async {
+  Future<Uint8List?> _finishSharedHit(
+    ImageCacheKey key,
+    DateTime now,
+    Map<ImageCacheKey, ImageBytesRecord> preEpoch,
+  ) async {
     final bytes = await _blobs.read(key);
     if (bytes == null || bytes.isEmpty) {
       _pendingAccess.remove(key);
       await _deleteBoth(key);
-      await _index.commit();
+      await _commitOrRollback(preEpoch);
       return null;
     }
     _pendingAccess[key] = now;
@@ -552,6 +573,7 @@ final class IndexedImageBytesCache implements IImageBytesCache {
     }
     return _runExclusive(() async {
       _ensureOpen();
+      final preEpoch = await _captureIndexSnapshot();
       await _flushPendingAccess();
       final now = _clock();
       await _blobs.write(key, bytes);
@@ -564,7 +586,7 @@ final class IndexedImageBytesCache implements IImageBytesCache {
         ),
       );
       await _trimCapacity();
-      await _index.commit();
+      await _commitOrRollback(preEpoch);
     });
   }
 
@@ -572,9 +594,10 @@ final class IndexedImageBytesCache implements IImageBytesCache {
   @override
   Future<void> evict(ImageCacheKey key) => _runExclusive(() async {
     _ensureOpen();
+    final preEpoch = await _captureIndexSnapshot();
     _pendingAccess.remove(key);
     await _deleteBoth(key);
-    await _index.commit();
+    await _commitOrRollback(preEpoch);
   });
 
   /// Flushes soft access, drops expired entries, capacity-trims, commits once,
@@ -582,6 +605,7 @@ final class IndexedImageBytesCache implements IImageBytesCache {
   @override
   Future<ImageBytesPruneReport> prune() => _runExclusive(() async {
     _ensureOpen();
+    final preEpoch = await _captureIndexSnapshot();
     await _flushPendingAccess();
     final evicted = <ImageCacheKey>[];
     var freed = 0;
@@ -600,7 +624,7 @@ final class IndexedImageBytesCache implements IImageBytesCache {
     }
 
     freed += await _trimCapacity(evicted: evicted);
-    await _index.commit();
+    await _commitOrRollback(preEpoch);
     await _reclaimOrphansUnlocked();
     return ImageBytesPruneReport(evictedKeys: evicted, freedBytes: freed);
   });
@@ -677,6 +701,50 @@ final class IndexedImageBytesCache implements IImageBytesCache {
   void _ensureOpen() {
     if (_closed) {
       throw StateError('IndexedImageBytesCache is closed');
+    }
+  }
+
+  /// Last-good RAM meta before this mutate epoch touches the mirror.
+  ///
+  /// [ImageBytesRecord] is immutable, so holding the instances is a faithful
+  /// snapshot of the pre-epoch map.
+  Future<Map<ImageCacheKey, ImageBytesRecord>> _captureIndexSnapshot() async => {
+    for (final record in await _index.values()) record.key: record,
+  };
+
+  /// Persists once; on failure restores the RAM mirror to [preEpoch] and rethrows.
+  ///
+  /// Without rollback, a thrown commit would leave optimistic puts/deletes as
+  /// in-process hits that no longer match durable storage ("write failed but
+  /// hit"). Blob IO is not rolled back. A failed write may leave an orphan
+  /// blob. A failed commit after trim, evict, or TTL may put index rows back
+  /// whose payloads were already deleted; the next read heals those as
+  /// index-without-blob, and those previously durable bodies stay gone. That
+  /// cost beats fail-closing the whole instance on a transient meta error.
+  Future<void> _commitOrRollback(Map<ImageCacheKey, ImageBytesRecord> preEpoch) async {
+    try {
+      await _index.commit();
+    } catch (error, stackTrace) {
+      await _restoreIndexMirror(preEpoch);
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
+  Future<void> _restoreIndexMirror(Map<ImageCacheKey, ImageBytesRecord> before) async {
+    final current = (await _index.values()).toList();
+    for (final record in current) {
+      if (!before.containsKey(record.key)) {
+        await _index.delete(record.key);
+      }
+    }
+    for (final MapEntry(:key, :value) in before.entries) {
+      final live = await _index.get(key);
+      if (live == null ||
+          live.writtenAt != value.writtenAt ||
+          live.accessedAt != value.accessedAt ||
+          live.byteLength != value.byteLength) {
+        await _index.put(value);
+      }
     }
   }
 

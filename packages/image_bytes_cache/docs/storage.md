@@ -49,9 +49,10 @@ Mutate epoch shape:
 
 ```text
 exclusiveMutate:
+  snapshot RAM mirror (last-good meta)
   flush soft access into RAM map
   apply puts / deletes / trim (including blob IO)
-  commitDurableMetaOnce
+  commitDurableMetaOnce   // on throw: restore RAM from snapshot, rethrow
   reclaimOrphanBlobs(indexedKeys)   // prune and explicit reclaim
 ```
 
@@ -59,6 +60,15 @@ Without the single-commit rule, a soft-LRU flush that touches N keys would
 rewrite the durable index N times. Without the shared exclusive domain, orphan
 reclaim can delete a blob mid-write. Open wrappers must pass reclaim into the
 brain; they must not reclaim outside that gate.
+
+If `commit` throws after RAM (and possibly blob) mutation, the brain restores
+the RAM mirror to the pre-epoch snapshot and rethrows. We picked that over
+fail-closing the instance, and over leaving a "write failed but RAM hit"
+lie. Blob IO is not rolled back. A failed write may leave an orphan blob. A
+failed commit after trim, evict, or TTL may put index rows back whose
+payloads are already gone; the next read heals those as index-without-blob,
+and those previously durable bodies stay gone. Resolve write-through still
+reports the thrown write via diagnostics and does not fail paint.
 
 After `close`, Indexed ops throw `StateError`. Platform wrappers close isolate
 or Cache/OPFS handles around the brain.

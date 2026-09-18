@@ -104,6 +104,38 @@ void main() {
       expect(events.single.message, contains('write-through failed'));
     });
 
+    test('index commit failure on write-through still returns network bytes', () async {
+      final body = Uint8List.fromList([5, 5]);
+      final fetcher = HttpBytesFetcher(
+        client: MockClient((_) async => http.Response.bytes(body, 200)),
+      );
+      addTearDown(fetcher.close);
+
+      final index = _CommitFailingIndex();
+      final blobs = _MapBlobStore();
+      final cache = IndexedImageBytesCache(
+        index: index,
+        blobs: blobs,
+        retention: const ImageBytesRetention.unlimited(),
+      );
+      final events = <ImageBytesLogEvent>[];
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        fetcher: fetcher,
+        diagnostics: ImageBytesDiagnostics.onEvent(events.add),
+      );
+      const url = 'https://cdn.example.com/commit-fail.svg';
+
+      final bytes = await resolver.resolve(const ImageBytesRequest(url: url));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(bytes, body);
+      expect(events, hasLength(1));
+      expect(events.single.op, ImageBytesLogOp.writeThrough);
+      // No optimistic RAM hit after the failed commit.
+      expect(await cache.read(ImageCacheKey.fromUrl(url)), isNull);
+    });
+
     test('throwing onEvent during write-through catch is not an unhandled async error', () async {
       final body = Uint8List.fromList([4, 4, 4]);
       final fetcher = HttpBytesFetcher(
@@ -408,5 +440,48 @@ final class _CloseRejectingImageBytesCache implements IImageBytesCache {
   @override
   Future<void> close() async {
     closed = true;
+  }
+}
+
+/// RAM index whose [commit] always throws (simulates durable meta failure).
+final class _CommitFailingIndex implements IImageBytesIndex {
+  final Map<String, ImageBytesRecord> records = {};
+
+  @override
+  Future<ImageBytesRecord?> get(ImageCacheKey key) async => records[key.value];
+
+  @override
+  Future<void> put(ImageBytesRecord record) async {
+    records[record.key.value] = record;
+  }
+
+  @override
+  Future<void> delete(ImageCacheKey key) async {
+    records.remove(key.value);
+  }
+
+  @override
+  Future<Iterable<ImageBytesRecord>> values() async => records.values;
+
+  @override
+  Future<void> commit() async {
+    throw StateError('simulated durable index commit failure');
+  }
+}
+
+final class _MapBlobStore implements IImageBytesBlobStore {
+  final Map<String, Uint8List> store = {};
+
+  @override
+  Future<Uint8List?> read(ImageCacheKey key) async => store[key.value];
+
+  @override
+  Future<void> write(ImageCacheKey key, Uint8List bytes) async {
+    store[key.value] = bytes;
+  }
+
+  @override
+  Future<void> delete(ImageCacheKey key) async {
+    store.remove(key.value);
   }
 }

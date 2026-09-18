@@ -1,5 +1,10 @@
 ## 0.0.2
 
+- **FIXED**: Failed durable index commit rolls the RAM meta mirror back to the
+  pre-epoch snapshot and rethrows. In-process reads cannot treat an optimistic
+  put as a durable hit. Blob orphans from the failed epoch heal via reclaim or
+  index-without-blob cleanup. Write-through still reports via diagnostics
+  without failing a successful network resolve.
 - **FIXED**: VM blob isolate death fails in-flight RPCs with `StateError`
   instead of hanging, drops the dead worker so later ops can respawn, and
   keeps the exclusive mutate gate from stalling on a dead worker.

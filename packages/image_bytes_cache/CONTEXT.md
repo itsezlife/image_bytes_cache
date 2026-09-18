@@ -31,10 +31,13 @@ for coalesce/fingerprint, assuming override keys fold Authorization
 Bytes store contract and the indexed composition over meta + blob halves.
 Hot path: concurrent reads on the RAM index mirror; write / evict / prune /
 TTL-delete / meta commit / orphan reclaim share one exclusive domain. Durable
-meta commits once per mutate epoch. Memory and NoOp implementations exist for
-tests and pre-configure.
+meta commits once per mutate epoch. If that commit throws, the RAM mirror
+rolls back to the pre-epoch snapshot (no optimistic durable hit); write-through
+still reports without failing resolve. Memory and NoOp implementations exist
+for tests and pre-configure.
 _Avoid_: Hive for this path; SQL SELECT on every read; bodies in SQLite BLOB
-columns; serializing pure reads; reclaim outside the exclusive domain
+columns; serializing pure reads; reclaim outside the exclusive domain;
+leaving "write failed but RAM hit" after a thrown commit
 
 **IImageBytesIndex** / **IImageBytesBlobStore**:
 Split ports: retention meta vs payload bytes. Index is a RAM mirror after

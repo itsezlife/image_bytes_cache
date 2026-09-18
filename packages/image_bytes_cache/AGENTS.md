@@ -79,8 +79,9 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
 - **Hot path:** concurrent shared reads on the RAM index mirror + blob read;
   soft LRU in `_pendingAccess` only; no durable meta IO on paint hits.
 - **Mutate epoch:** write / evict / prune / TTL-delete / reclaim / close share
-  one exclusive domain; flush soft access → mutate RAM + blobs → one `commit`
-  → reclaim when applicable.
+  one exclusive domain; snapshot RAM → flush soft access → mutate RAM + blobs →
+  one `commit` → reclaim when applicable. Thrown commit restores the RAM
+  snapshot (no optimistic durable hit) and rethrows.
 - **64 KiB cut:** VM transferable isolate writes and web OPFS vs Cache API use
   the same threshold. Do not collapse to all-OPFS or all-Cache without updating
   docs and tests.
