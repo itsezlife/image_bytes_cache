@@ -9,24 +9,6 @@ mirror → platform blob stores, plus a resolve ladder (cache → network coales
 | [`image_bytes_cache`](packages/image_bytes_cache/) | Pure-Dart engine (stores, ladder, microbenches) |
 | [`image_bytes_cache_flutter`](packages/image_bytes_cache_flutter/) | Flutter widgets / SVG paint; profile compare harness |
 
-## Installation
-
-```yaml
-dependencies:
-  image_bytes_cache:
-    git:
-      url: https://github.com/itsezlife/image_bytes_cache.git
-      path: packages/image_bytes_cache
-      ref: main
-  image_bytes_cache_flutter:
-    git:
-      url: https://github.com/itsezlife/image_bytes_cache.git
-      path: packages/image_bytes_cache_flutter
-      ref: main
-```
-
-Core-only hosts may omit `image_bytes_cache_flutter`.
-
 ## Quick start
 
 ```dart

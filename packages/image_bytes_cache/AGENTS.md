@@ -7,10 +7,7 @@ section. Glossary: [`CONTEXT.md`](CONTEXT.md).
 
 `image_bytes_cache` is a durable remote **image bytes** engine: identity key →
 RAM meta mirror → platform blob stores, plus a resolve ladder (cache → network
-coalesce → write-through). Product is raw bytes, not decoded bitmaps and not
-Flutter `ImageCache`. Widgets, SVG paint, and UI/profile benches live in the
-sibling [`image_bytes_cache_flutter`](../image_bytes_cache_flutter/) package —
-not here. Package version `0.1.0`.
+coalesce → write-through).
 
 ## Commands (run before you claim done)
 

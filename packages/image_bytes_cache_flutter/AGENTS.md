@@ -5,10 +5,6 @@ High-signal orientation for LLMs/agents working in
 [`CONTEXT.md`](CONTEXT.md). Sibling core:
 [`../image_bytes_cache/`](../image_bytes_cache/).
 
-Flutter paint adapters above pure-Dart `image_bytes_cache`. Package version
-`0.1.0`. First slice: remote SVG via `CachedNetworkSvgImage`. Raster
-ImageProviders may land here later; they stay out of the core package.
-
 ## Owns
 
 - Flutter widgets that paint resolved image **bytes** (SVG today;
