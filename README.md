@@ -1,15 +1,30 @@
 # image_bytes_cache
 
-Durable remote **image bytes** for Dart and Flutter: identity key → RAM meta
-mirror → platform blob stores, plus a resolve ladder (cache → network coalesce
-→ write-through). Paint adapters live in a sibling Flutter package.
+Fetch a remote image once, keep the bytes on disk (or in the browser), and hand them back on the next request. Works in plain Dart and in Flutter.
 
-| Package | Role |
+Two packages live here:
+
+| Package | What you get |
 | --- | --- |
-| [`image_bytes_cache`](packages/image_bytes_cache/) | Pure-Dart engine (stores, ladder, microbenches) |
-| [`image_bytes_cache_flutter`](packages/image_bytes_cache_flutter/) | Flutter widgets / SVG paint; profile compare harness |
+| [`image_bytes_cache`](packages/image_bytes_cache/) | Open the cache, resolve URLs to bytes |
+| [`image_bytes_cache_flutter`](packages/image_bytes_cache_flutter/) | Widgets that paint those bytes (SVG today) |
+
+The core package stores bytes only. Decoding and drawing stay with you or with the Flutter package.
+
+## Install
+
+```yaml
+dependencies:
+  image_bytes_cache: latest
+```
+
+For Flutter, also pull in `image_bytes_cache_flutter` the same way.
+
+Then `dart pub get` or `flutter pub get`.
 
 ## Quick start
+
+Open the cache once at process start. On mobile and desktop, pass a reclaimable cache directory. Web ignores `directory`.
 
 ```dart
 import 'package:image_bytes_cache/image_bytes_cache.dart';
@@ -26,20 +41,27 @@ final bytes = await ImageBytesResolver.shared().resolve(
 );
 ```
 
-Flutter SVG paint (after the same `open` / `configure`):
+In Flutter, after the same `open` / `configure`:
 
 ```dart
 import 'package:image_bytes_cache_flutter/image_bytes_cache_flutter.dart';
 
-CachedNetworkSvgImage('https://cdn.example.com/logo.svg', width: 48, height: 48);
+CachedNetworkSvgImage(
+  'https://cdn.example.com/logo.svg',
+  width: 48,
+  height: 48,
+);
 ```
 
-## Docs
+What happens on resolve: look in the cache, fetch over the network if missing, then save in the background. Duplicate in-flight requests for the same URL share one download.
 
-- Core: [`packages/image_bytes_cache/README.md`](packages/image_bytes_cache/README.md),
-  [`AGENTS.md`](packages/image_bytes_cache/AGENTS.md),
-  [`docs/`](packages/image_bytes_cache/docs/)
-- Flutter: [`packages/image_bytes_cache_flutter/README.md`](packages/image_bytes_cache_flutter/README.md)
+Default retention is 14 days, 500 entries, and 50 MiB. Limits apply on read and write. There is no background timer.
+
+## Where to read more
+
+- Core API, retention, diagnostics: [`packages/image_bytes_cache/README.md`](packages/image_bytes_cache/README.md)
+- Flutter widget options: [`packages/image_bytes_cache_flutter/README.md`](packages/image_bytes_cache_flutter/README.md)
+- Internals for contributors: [`packages/image_bytes_cache/AGENTS.md`](packages/image_bytes_cache/AGENTS.md), [`docs/`](packages/image_bytes_cache/docs/)
 
 ## Development
 
@@ -59,6 +81,6 @@ flutter analyze
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 
 Copyright (c) 2026 Zulufov Emil <emilzulufov566@gmail.com>
