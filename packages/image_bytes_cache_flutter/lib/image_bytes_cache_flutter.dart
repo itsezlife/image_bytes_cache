@@ -6,8 +6,7 @@
 /// [ImageBytesCache.configure] on the core package.
 ///
 /// Soft paint failures stay widget-local ([CachedNetworkSvgImage.onError] /
-/// [CachedNetworkSvgImage.errorBuilder]); this package does not depend on a
-/// product logger.
+/// [CachedNetworkSvgImage.errorBuilder] for resolve and SVG decode/paint).
 library;
 
 export 'src/widget/cached_network_svg_image.dart';

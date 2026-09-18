@@ -34,10 +34,13 @@ files, sockets, or durable stores from widgets.
 
 1. **Depend on core contracts only** (`IImageBytesResolver`, `ImageCacheKey`,
    request types). Do not reimplement ladder, coalesce, or blob IO here.
-2. **Soft paint failures stay widget-local** (`onError` / `errorBuilder` /
-   placeholder). No product logger inside paint adapters.
+2. **Soft paint failures stay widget-local** (`onError` / `errorBuilder` for
+   resolve **and** SVG decode/paint — never endless placeholder alone). No
+   product logger inside paint adapters.
 3. **PageStorage identity** aligns with `ImageCacheKey` when a short-lived
-   copy is kept for scroll restore.
+   copy is kept for scroll restore; keep it bounded / opt-out
+   (`pageStorageMaxBytes` / `persistInPageStorage`), never a second durable
+   store.
 4. **No dual implementations** in host design-system packages — migrate or
    re-export; do not keep a second resolve/paint tree beside this package.
 5. **Profile / compare harnesses** that need a Flutter binding live in this

@@ -19,11 +19,17 @@ This package does not open files, sockets, or durable stores. Hosts still call
 - **CachedNetworkSvgImage.** Loads via the shared resolver and draws with
   `SvgPicture.memory`.
 - **Scroll-friendly identity.** Optional short-lived `PageStorage` copy under
-  the same `ImageCacheKey` as the durable store.
+  the same `ImageCacheKey` as the durable store, size-bounded
+  (`pageStorageMaxBytes`, default 64 KiB) and disableable via
+  `persistInPageStorage: false`.
 - **Sealed load states.** `CachedNetworkSvgImageState` is
   `loading` / `populated` / `failure`. Use `map` so each variant owns its tree.
-- **Soft failures stay local.** `placeholderBuilder`, `errorBuilder`, and
-  `onError` only. No product logger inside the widget.
+- **Soft failures stay local.** Resolve **and** SVG parse/paint failures go
+  through `errorBuilder` / `onError` — never an endless `placeholderBuilder`.
+  No product logger inside the widget.
+- **Identity-aligned reloads.** `didUpdateWidget` gates on `ImageCacheKey`
+  (canonical headers), not raw map equality. Keep-previous picture while a new
+  URL resolves.
 - **Testable.** Inject an `IImageBytesResolver`; leave durable open policy in
   the host or core test doubles.
 
@@ -100,9 +106,11 @@ when `errorBuilder` is omitted.
 | `resolver` | Override for tests; default `ImageBytesResolver.shared()` |
 | `width` / `height` / `fit` / `alignment` | Passed through to `SvgPicture` |
 | `theme` / `colorFilter` | flutter_svg styling |
-| `placeholderBuilder` | While `CachedNetworkSvgImageState.loading` |
-| `errorBuilder` | On `failure`; default is an empty box |
+| `placeholderBuilder` | While `CachedNetworkSvgImageState.loading` (not reused during SVG decode) |
+| `errorBuilder` | On `failure` (resolve or paint); default is an empty box |
 | `onError` | Called once per failure transition |
+| `persistInPageStorage` | Default `true`; set `false` to skip widget-local body cache |
+| `pageStorageMaxBytes` | Max bytes written to PageStorage (default 64 KiB) |
 
 ```dart
 CachedNetworkSvgImage(
