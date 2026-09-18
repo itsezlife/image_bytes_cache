@@ -278,6 +278,6 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
       '${objectRuntimeType(this, 'CachedNetworkBytesImageProvider')}'
       '("$url", scale: ${scale.toStringAsFixed(1)}'
       '${_hasDecodeSize ? ', cacheWidth: $cacheWidth, cacheHeight: $cacheHeight'
-          ', allowUpscaling: $allowUpscaling' : ''}'
+                ', allowUpscaling: $allowUpscaling' : ''}'
       ', cacheKey: $cacheKey)';
 }
