@@ -1,10 +1,39 @@
 name: CI
 
 on:
+  workflow_dispatch:
+    inputs:
+      dart-sdk:
+        description: "Dart SDK version for the core package"
+        default: "3.11"
+        required: false
+      flutter-channel:
+        description: "Flutter channel for the adapters package"
+        default: "stable"
+        required: false
   push:
-    branches: [main, master]
+    branches:
+      - main
+      - master
+    paths:
+      - ".github/**"
+      - "packages/image_bytes_cache/**"
+      - "packages/image_bytes_cache_flutter/**"
   pull_request:
-    branches: [main, master]
+    branches:
+      - main
+      - master
+      - "feature/**"
+      - "bugfix/**"
+      - "hotfix/**"
+      - "support/**"
+    paths:
+      - ".github/**"
+      - "packages/image_bytes_cache/**"
+      - "packages/image_bytes_cache_flutter/**"
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -12,31 +41,108 @@ concurrency:
 
 jobs:
   core:
-    name: Core (Dart)
+    name: "📦 Core (Dart)"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: packages/image_bytes_cache
     steps:
-      - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
+      - name: 📦 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🎯 Setup Dart
+        uses: dart-lang/setup-dart@v1
         with:
-          sdk: "3.11"
-      - run: dart pub get
-      - run: dart analyze lib test
-      - run: dart test test/unit_test.dart
+          sdk: ${{ github.event.inputs.dart-sdk || '3.11' }}
+
+      - name: 🚂 Setup package
+        id: setup
+        uses: ./.github/actions/setup-package
+        with:
+          working-directory: packages/image_bytes_cache
+          package-manager: dart
+
+      - name: 🚦 Check format
+        timeout-minutes: 2
+        run: |
+          dart format --set-exit-if-changed --output=none lib test
+
+      - name: 📈 Analyze
+        timeout-minutes: 3
+        run: |
+          dart analyze --fatal-infos --fatal-warnings lib test
+
+      - name: 🧪 Unit tests
+        timeout-minutes: 8
+        run: |
+          dart test test/unit_test.dart
+
+  web:
+    name: "🌐 Web (Chrome)"
+    needs: core
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: packages/image_bytes_cache
+    steps:
+      - name: 📦 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🎯 Setup Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ github.event.inputs.dart-sdk || '3.11' }}
+
+      - name: 🧭 Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: 🚂 Setup package
+        uses: ./.github/actions/setup-package
+        with:
+          working-directory: packages/image_bytes_cache
+          package-manager: dart
+
+      - name: 🧪 Chrome open smoke
+        timeout-minutes: 10
+        run: |
+          dart test -p chrome test/open/image_bytes_cache_open_web_test.dart
 
   flutter:
-    name: Flutter adapters
+    name: "📱 Flutter adapters"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: packages/image_bytes_cache_flutter
     steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - name: 📦 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐦 Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
-          channel: stable
-      - run: flutter pub get
-      - run: flutter analyze lib test
-      - run: flutter test
+          channel: ${{ github.event.inputs.flutter-channel || 'stable' }}
+          cache: true
+
+      - name: 🚂 Setup package
+        uses: ./.github/actions/setup-package
+        with:
+          working-directory: packages/image_bytes_cache_flutter
+          package-manager: flutter
+
+      - name: 🚦 Check format
+        timeout-minutes: 2
+        run: |
+          dart format --set-exit-if-changed --output=none lib test
+
+      - name: 📈 Analyze
+        timeout-minutes: 5
+        run: |
+          flutter analyze --fatal-infos lib test
+
+      - name: 🧪 Widget tests
+        timeout-minutes: 10
+        run: |
+          flutter test

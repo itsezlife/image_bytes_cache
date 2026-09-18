@@ -1,0 +1,71 @@
+name: "Setup package"
+description: >-
+  Verify pubspec/CHANGELOG version alignment, restore pub cache, and install
+  package dependencies (dart or flutter).
+
+inputs:
+  working-directory:
+    description: "Package directory relative to the repository root"
+    required: true
+  package-manager:
+    description: "Package manager to use: dart or flutter"
+    required: true
+    default: dart
+
+outputs:
+  version:
+    description: "Package version from pubspec.yaml"
+    value: ${{ steps.version.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Verify pubspec and CHANGELOG versions
+      id: version
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        test -f pubspec.yaml
+        test -f CHANGELOG.md
+        version_pubspec=$(grep '^version:' pubspec.yaml | awk '{print $2}' | tr -d '\r')
+        echo "Version from pubspec.yaml: '$version_pubspec'"
+        grep -qE "^##[[:space:]]+${version_pubspec}([[:space:]]|$)" CHANGELOG.md \
+          || { echo "Version '$version_pubspec' not found as a ## heading in CHANGELOG.md" >&2; exit 1; }
+        echo "version=$version_pubspec" >> "$GITHUB_OUTPUT"
+
+    - name: Restore pub cache
+      id: cache-pub-restore
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/.pub-cache
+        key: ${{ runner.os }}-pub-${{ inputs.working-directory }}-${{ hashFiles(format('{0}/pubspec.yaml', inputs.working-directory), 'packages/image_bytes_cache/pubspec.yaml') }}
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        case "${{ inputs.package-manager }}" in
+          dart)
+            dart pub get
+            ;;
+          flutter)
+            flutter config --disable-analytics --no-cli-animations
+            flutter pub get
+            ;;
+          *)
+            echo "Unsupported package-manager: ${{ inputs.package-manager }}" >&2
+            exit 1
+            ;;
+        esac
+
+    - name: Save pub cache
+      id: cache-pub-save
+      if: steps.cache-pub-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ~/.pub-cache
+        key: ${{ steps.cache-pub-restore.outputs.cache-primary-key }}

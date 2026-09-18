@@ -58,7 +58,8 @@ flutter analyze
 ```
 
 Core store microbenches and Chrome open smoke stay in
-[`../image_bytes_cache/`](../image_bytes_cache/AGENTS.md).
+[`../image_bytes_cache/`](../image_bytes_cache/AGENTS.md) (Chrome open is a CI
+merge gate on the core package).
 
 Three-way bytes compare and profile scroll-pressure matrix (optional
 real-device `--profile`, not a merge gate):

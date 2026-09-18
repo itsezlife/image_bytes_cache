@@ -107,5 +107,5 @@ Chrome integration: from the package root,
 `dart test -p chrome test/open/image_bytes_cache_open_web_test.dart`
 
 Covers Cache vs OPFS routing by size, close/reopen, and orphan reclaim on both
-backends. If a CI agent cannot host Chrome, run that file locally before
-merging web blob changes.
+backends. CI runs this as a merge gate; also run it locally when iterating on
+web blob / open code.

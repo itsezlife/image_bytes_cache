@@ -17,7 +17,7 @@ dart test test/unit_test.dart
 dart analyze lib test
 dart format lib test   # page_width 120
 
-# Web smoke (Chrome), required before merging web blob / open changes:
+# Web smoke (Chrome) — CI merge gate; run locally when touching web blob / open:
 dart test -p chrome test/open/image_bytes_cache_open_web_test.dart
 
 # Store + ladder microbenches (not a CI gate) — baseline deltas:
@@ -115,8 +115,8 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
   the real fetch URL.
 - `HttpBytesFetcher` timeout does not cover pool wait time (intentionally
   unbounded queue); timeout uses `AbortableRequest` after a slot is acquired.
-- Chrome open test is the honesty check for Cache/OPFS; do not merge web blob
-  changes on green VM tests alone.
+- Chrome open test is the honesty check for Cache/OPFS and a CI merge gate; do
+  not merge web blob changes on green VM tests alone.
 
 ## The docs
 

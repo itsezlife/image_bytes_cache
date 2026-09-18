@@ -36,10 +36,10 @@ dart test -p chrome test/open/image_bytes_cache_open_web_test.dart
 ```
 
 Covers Cache vs OPFS routing by size, close/reopen, and orphan reclaim on both
-backends. If CI cannot host Chrome, run that file locally before merging web
-blob changes. `test/storage/image_bytes_web_store_test.dart` covers the index
-codec and web key helpers on the VM harness; use the Chrome open test for real
-Cache/OPFS composition.
+backends. This is a CI merge gate (GitHub Actions `web` job). Run it locally
+when iterating on web blob / open code. `test/storage/image_bytes_web_store_test.dart`
+covers the index codec and web key helpers on the VM harness; use the Chrome
+open test for real Cache/OPFS composition.
 
 ## Test seams
 

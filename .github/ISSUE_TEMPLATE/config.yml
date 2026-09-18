@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Package README
+    url: https://github.com/itsezlife/image_bytes_cache#readme
+    about: Start here for install, quick start, and package layout.
