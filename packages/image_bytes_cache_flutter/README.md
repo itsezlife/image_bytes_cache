@@ -13,18 +13,18 @@ through the core ladder, then paint. This package ships raster
 Widgets here do not open files, sockets, or durable stores. Call
 `ImageBytesCache.open` / `configure` on the core package once before paint.
 
-## Features
+## 🌟 Features
 
-- **Thin paint layer.** Depends on `IImageBytesResolver` / `ImageCacheKey`
+- **🪶 Thin paint layer**: Depends on `IImageBytesResolver` / `ImageCacheKey`
   only. No second resolve tree in widgets.
-- **Raster.** Provider for any `ImageProvider` slot (`Image`,
+- **🖼️ Raster**: Provider for any `ImageProvider` slot (`Image`,
   `DecorationImage`, …) plus a thin `Image`-shaped widget. Optional display-
   sized decode for Flutter `ImageCache`; durable keys stay `ImageCacheKey`.
-- **SVG.** `CachedNetworkSvgImage` with sealed load state, optional bounded
+- **✏️ SVG**: `CachedNetworkSvgImage` with sealed load state, optional bounded
   `PageStorage` restore, and soft failures via `errorBuilder` / `onError`.
-- **Testable.** Inject an `IImageBytesResolver` in tests.
+- **🧪 Testable**: Inject an `IImageBytesResolver` in tests.
 
-## Installation
+## 📦 Installation
 
 ```yaml
 dependencies:
@@ -33,7 +33,7 @@ dependencies:
 
 Then `flutter pub get`.
 
-## Quick start
+## 🚀 Quick Start
 
 ### 1. Bootstrap the core cache
 
@@ -132,7 +132,7 @@ CachedNetworkSvgImage(
 Defaults: shared resolver, `BoxFit.contain`, empty box when `errorBuilder` is
 omitted.
 
-## Platform support
+## 📱 Platform Support
 
 Same targets as Flutter and the core package: Android, iOS, Web, Windows,
 macOS, Linux. Persistence behavior is defined by core `ImageBytesCache.open`.
@@ -160,7 +160,7 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 - [Zulufov Emil](https://github.com/itsezlife)
 
-## License
+## 📝 License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file
 for details.
