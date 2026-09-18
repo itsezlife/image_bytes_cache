@@ -32,22 +32,32 @@ fingerprinting.
 
 ## Request and resolve
 
-`ImageBytesRequest` carries `url`, optional `headers`, and optional
-`cacheKey`. When `cacheKey` is null, the resolver builds one with
-`ImageCacheKey.fromUrl` (canonical URL + headers). When `cacheKey` is set, that
-value is the **full** durable identity: headers still go on the network GET but
-are not folded into the key. Hosts that vary `Authorization` across logical
-resources must omit `cacheKey` or mint distinct overrides — the ladder will not
-silently share one override across different Authorization values.
+`ImageBytesRequest` carries `url`, optional `headers`, optional `cacheKey`,
+and optional `onBytesProgress`. When `cacheKey` is null, the resolver builds
+one with `ImageCacheKey.fromUrl` (canonical URL + headers). When `cacheKey` is
+set, that value is the **full** durable identity: headers still go on the
+network GET but are not folded into the key. Hosts that vary `Authorization`
+across logical resources must omit `cacheKey` or mint distinct overrides — the
+ladder will not silently share one override across different Authorization
+values.
+
+`onBytesProgress` is an optional sink (`cumulative`, optional `total`) for
+honest HTTP body progress. The ladder forwards it to `HttpBytesFetcher` on a
+**network miss** only. A durable non-empty cache hit returns bytes without
+invoking the sink — do not invent mid-download percents from silence. Resolve
+remains a single `Future<Uint8List>` of the full body; there is no public
+streaming resolve API. The sink does not participate in `ImageCacheKey`
+identity or in-flight coalesce.
 
 `ImageBytesResolver` order:
 
-1. `cache.read(key)`. Non-empty hit returns immediately.
+1. `cache.read(key)`. Non-empty hit returns immediately (no progress events).
 2. Empty cached payload counts as a **miss** (bad empty write must not poison
    the ladder). Durable stores also refuse to retain empty writes (evict the
    key instead) and scrub sticky empty rows on read so they cannot waste
    `maxEntries` capacity.
-3. `HttpBytesFetcher.getBytes` on `Uri.base.resolve(url)` on miss.
+3. `HttpBytesFetcher.getBytes` on `Uri.base.resolve(url)` on miss, forwarding
+   `onBytesProgress` when present.
 4. Return network bytes; schedule `cache.write` with `unawaited`. Write failure
    reports through `ImageBytesDiagnostics` and does **not** fail `resolve`.
    A throwing host `onEvent` callback is swallowed inside `report` so the
@@ -75,6 +85,12 @@ canonical headers) share one in-flight `Future`. Non-2xx → `ClientException`.
 Empty body → `StateError` (fail closed; no silent empty paint). After `close`,
 new `getBytes` calls throw; in-flight work may still finish or fail. If the
 fetcher created its own `http.Client`, `close` closes that client.
+
+When `onBytesProgress` is supplied on the caller that **starts** the in-flight
+GET, the fetcher reports cumulative bytes as the response body is read (`total`
+from Content-Length when present). Without a sink, the body is consolidated
+without inventing chunk events. Coalesced joiners share the same `Future`; the
+progress sink does not change coalesce identity.
 
 Timeout uses `http.AbortableRequest`: clients that honor `abortTrigger`
 (`IOClient`, browser client) release the underlying connection when the

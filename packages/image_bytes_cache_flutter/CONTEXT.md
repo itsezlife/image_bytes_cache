@@ -1,14 +1,46 @@
 # image_bytes_cache_flutter
 
 Flutter paint adapters for the durable bytes engine in sibling
-[`image_bytes_cache`](../image_bytes_cache/CONTEXT.md). Widgets resolve via
+[`image_bytes_cache`](../image_bytes_cache/CONTEXT.md). Adapters resolve via
 [IImageBytesResolver]; they do not open stores or own HTTP coalesce.
 
 Bootstrap stays on core: `ImageBytesCache.open` / `configure` / diagnostics.
 Design-system hosts may re-export paint types for call-site stability;
 implementation and widget tests live here.
 
+Raster and SVG are separate paint mechanisms that share the same bytes
+resolver. A format-routing facade that picks SVG vs raster at one call site is
+not part of this context until real dual call sites force it.
+_Avoid_: auto-detecting format from URL or magic bytes as the primary API;
+one mega-widget that owns both SVG and Flutter decode lifecycles
+
 ## Language
+
+### Raster (Flutter decode)
+
+**CachedNetworkBytesImageProvider**:
+[ImageProvider] that resolves remote image **bytes** through
+[IImageBytesResolver], then decodes with Flutter's image pipeline (whatever
+codecs the engine accepts — PNG, JPEG, WebP, multi-frame GIF, and siblings).
+Flutter [ImageCache] identity is [ImageCacheKey] plus scale and optional
+decode size; durable store identity stays [ImageCacheKey] alone. Optional
+injected resolver for tests. Optional [errorListener] for soft resolve /
+empty-body / decode failures when the host has no [Image.errorBuilder].
+Does not mirror bodies into [PageStorage].
+_Avoid_: opening files/sockets; forking the durable key by decode size;
+PageStorage-of-bytes on this path; inventing a sealed load state beside
+[ImageStream]; treating [errorListener] as a product logger
+
+**CachedNetworkBytesImage**:
+Thin [Image] convenience over [CachedNetworkBytesImageProvider]. Call-site
+surface near [Image.network] (builders, gapless playback, semantics, fit,
+sized decode). Soft failures via [Image.errorBuilder] and optional [onError]
+(forwards to the provider [errorListener]). No sealed load hierarchy and no
+product logger.
+_Avoid_: chat/avatar chrome, clip shapes, or design tokens in this type;
+SVG-style sealed [loading]/[populated]/[failure] state for raster
+
+### SVG
 
 **CachedNetworkSvgImage**:
 Remote SVG paint from resolver bytes. Optional short-lived [PageStorage] copy
@@ -28,4 +60,5 @@ decode failure as endless [placeholderBuilder]
 Sealed load lifecycle for the SVG widget. [failure] covers resolver errors and
 SVG decode/paint errors. Use [CachedNetworkSvgImageState.map] so each variant
 owns its widget tree.
-_Avoid_: boolean loading/error flags beside the sealed hierarchy
+_Avoid_: boolean loading/error flags beside the sealed hierarchy; applying this
+hierarchy to raster [CachedNetworkBytesImage]

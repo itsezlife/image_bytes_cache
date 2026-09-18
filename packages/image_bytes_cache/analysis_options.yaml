@@ -93,7 +93,6 @@ analyzer:
     use_super_parameters: warning
 
     # Error
-    always_use_package_imports: error
     avoid_dynamic_calls: error
     avoid_relative_lib_imports: error
     # prefer_relative_imports stays off (rule false below); package imports are the contract.
@@ -153,9 +152,7 @@ linter:
     lines_longer_than_80_chars: false
 
     # Enabling rules
-    always_use_package_imports: true
     avoid_relative_lib_imports: true
-
 
     # Disable rules
     sort_pub_dependencies: false

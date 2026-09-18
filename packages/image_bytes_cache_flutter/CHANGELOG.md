@@ -1,3 +1,16 @@
+## 0.1.0
+
+- **ADDED**: Raster paint adapters —
+  `CachedNetworkBytesImageProvider` and thin `CachedNetworkBytesImage` over
+  `IImageBytesResolver`. Display-sized decode (`cacheWidth` / `cacheHeight` /
+  `.sized`) splits Flutter `ImageCache` entries without changing durable
+  `ImageCacheKey`. Optional `errorListener` on the provider (widget `onError`
+  forwards into it) for soft resolve / empty-body / decode failures when the
+  host has no `Image.errorBuilder`. Network-miss progress maps to
+  `ImageChunkEvent`; cache hits invent no mid-download percents. No PageStorage
+  body mirror and no sealed raster load state. Hosts still
+  `ImageBytesCache.open` / `configure` before paint.
+
 ## 0.0.2
 
 - **FIXED**: `CachedNetworkSvgImage` forwards SVG parse/paint failures through

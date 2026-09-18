@@ -6,6 +6,14 @@ import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 import 'package:meta/meta.dart';
 import 'package:pool/pool.dart';
 
+/// Observes cumulative HTTP body bytes while a network GET consolidates.
+///
+/// [cumulative] is bytes received so far for this response. [total] is the
+/// response Content-Length when the server provides one; otherwise `null`.
+/// Callers must not invent mid-download percents when this is never invoked
+/// (for example on a durable cache hit upstream of the fetcher).
+typedef ImageBytesProgressCallback = void Function(int cumulative, int? total);
+
 /// HTTP GET for response bodies, with a concurrency cap and in-flight coalescing.
 ///
 /// Fetches bytes only. Callers own disk cache and decoding. Format is
@@ -32,6 +40,12 @@ import 'package:pool/pool.dart';
 /// release the underlying connection when [timeout] elapses. Clients that do
 /// not abort still fail the waiter via [TimeoutException]; any leftover
 /// in-flight work is then a property of that client, not of this pool.
+///
+/// Optional [ImageBytesProgressCallback] reports real cumulative (and total
+/// when known) while the response body is read. Resolve stays a single
+/// [Future] of the full body — this is not a public streaming API. Coalesce
+/// identity remains [ImageCacheKey] only; a progress sink does not split
+/// in-flight downloads.
 final class HttpBytesFetcher {
   /// [maxConcurrent] caps parallel GETs (default 6). Further callers wait in
   /// [Pool] until a slot frees. That wait is not covered by [timeout].
@@ -78,9 +92,16 @@ final class HttpBytesFetcher {
   /// Throws [http.ClientException] on non-2xx, [StateError] on an empty body,
   /// [TimeoutException] when [timeout] elapses after a pool slot is acquired,
   /// and [StateError] after [close].
+  ///
+  /// When [onBytesProgress] is set on the caller that **starts** the in-flight
+  /// GET, it receives cumulative byte counts as the body is read ([total] from
+  /// Content-Length when present). Coalesced joiners share the same [Future]
+  /// but do not attach an additional sink — identity / coalesce keys stay
+  /// unchanged.
   Future<Uint8List> getBytes(
     Uri url, {
     Map<String, String>? headers,
+    ImageBytesProgressCallback? onBytesProgress,
   }) {
     if (_closed) {
       throw StateError('HttpBytesFetcher is closed');
@@ -92,7 +113,7 @@ final class HttpBytesFetcher {
 
     // One Future instance for coalesced callers. whenComplete clears the map
     // without swallowing the result or error.
-    final future = _pool.withResource(() => _performGet(url, headers)).whenComplete(() {
+    final future = _pool.withResource(() => _performGet(url, headers, onBytesProgress)).whenComplete(() {
       _inFlight.remove(key);
     });
     _inFlight[key] = future;
@@ -102,6 +123,7 @@ final class HttpBytesFetcher {
   Future<Uint8List> _performGet(
     Uri url,
     Map<String, String>? headers,
+    ImageBytesProgressCallback? onBytesProgress,
   ) async {
     final abort = Completer<void>();
     final timer = Timer(timeout, () {
@@ -117,7 +139,7 @@ final class HttpBytesFetcher {
       try {
         return await () async {
           final streamed = await _client.send(request);
-          final bytes = await streamed.stream.toBytes();
+          final bytes = await _readBody(streamed, onBytesProgress);
 
           if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
             throw http.ClientException(
@@ -130,7 +152,7 @@ final class HttpBytesFetcher {
             throw StateError('Downloaded body is empty: $url');
           }
 
-          return Uint8List.fromList(bytes);
+          return bytes;
         }().timeout(timeout);
       } on TimeoutException {
         // Non-abortable clients (e.g. MockClient): fail the waiter and still
@@ -149,6 +171,29 @@ final class HttpBytesFetcher {
     } finally {
       timer.cancel();
     }
+  }
+
+  /// Consolidates [streamed] into one buffer. With a progress sink, reports
+  /// after each chunk; without one, uses the ordinary [ByteStream.toBytes]
+  /// path so no synthetic chunk events are invented.
+  static Future<Uint8List> _readBody(
+    http.StreamedResponse streamed,
+    ImageBytesProgressCallback? onBytesProgress,
+  ) async {
+    if (onBytesProgress == null) {
+      return Uint8List.fromList(await streamed.stream.toBytes());
+    }
+
+    final total = streamed.contentLength;
+    final knownTotal = total != null && total >= 0 ? total : null;
+    final builder = BytesBuilder(copy: false);
+    var cumulative = 0;
+    await for (final chunk in streamed.stream) {
+      builder.add(chunk);
+      cumulative += chunk.length;
+      onBytesProgress(cumulative, knownTotal);
+    }
+    return builder.takeBytes();
   }
 
   /// Closes the pool and, when this instance created the client, the client.

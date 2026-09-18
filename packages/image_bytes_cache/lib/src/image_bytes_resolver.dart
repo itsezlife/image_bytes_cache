@@ -15,6 +15,7 @@ final class ImageBytesRequest {
     required this.url,
     this.headers,
     this.cacheKey,
+    this.onBytesProgress,
   });
 
   /// Absolute or [Uri.base]-relative URL.
@@ -41,6 +42,16 @@ final class ImageBytesRequest {
   /// themselves — the ladder will not silently poison one override across
   /// different Authorization values.
   final ImageCacheKey? cacheKey;
+
+  /// Optional sink for honest HTTP body progress on a network miss.
+  ///
+  /// Forwarded to [HttpBytesFetcher.getBytes] only when the ladder actually
+  /// fetches. A durable non-empty cache hit returns bytes without invoking this
+  /// callback — hosts must not treat silence as "0%" or invent mid-download
+  /// percents. Resolve remains a single [Future] of the full body; this is not
+  /// a streaming resolve API. Does not participate in [ImageCacheKey] identity
+  /// or in-flight coalesce.
+  final ImageBytesProgressCallback? onBytesProgress;
 }
 
 /// Looks up bytes in a cache, then fetches, then write-through.
@@ -51,6 +62,9 @@ abstract interface class IImageBytesResolver {
   /// the ladder. After a network hit, persistence runs off the critical path;
   /// a durable write failure is reported via [ImageBytesDiagnostics] and does
   /// not fail this future.
+  ///
+  /// When [ImageBytesRequest.onBytesProgress] is set, the ladder forwards it on
+  /// a network miss only. Cache hits do not synthesize progress events.
   Future<Uint8List> resolve(ImageBytesRequest request);
 }
 
@@ -139,6 +153,7 @@ final class ImageBytesResolver implements IImageBytesResolver {
     final bytes = await fetcher.getBytes(
       Uri.base.resolve(request.url),
       headers: request.headers,
+      onBytesProgress: request.onBytesProgress,
     );
 
     // Persist off the critical path. A failed write must not fail paint that
