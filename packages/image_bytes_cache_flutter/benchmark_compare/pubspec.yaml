@@ -1,0 +1,50 @@
+# Head-to-head “URL → bytes ready” compare package.
+#
+# Lives under image_bytes_cache_flutter/benchmark_compare (not published with
+# the flutter package). Competitor deps stay here, never on core or flutter
+# package pubspecs.
+name: image_bytes_cache_benchmark_compare
+description: >-
+  Three-way URL→bytes compare: image_bytes_cache vs cached_network_image_ce
+  (Hive) vs stock cached_network_image (sqflite).
+publish_to: "none"
+
+version: 0.0.1
+
+environment:
+  sdk: ">=3.11.0"
+  flutter: ">=3.41.7"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Parent flutter package (placement) + core for resolve / durable open.
+  # Bytes adapters import core directly; paint/profile lanes use the parent.
+  image_bytes_cache_flutter:
+    path: ../
+  image_bytes_cache:
+    path: ../../image_bytes_cache
+
+  # Competitors — compare-only.
+  cached_network_image_ce: ^4.10.0
+  cached_network_image: ^3.4.1
+  flutter_cache_manager: ^3.4.1
+  sqflite_common_ffi: ^2.3.4
+
+  file: ">=7.0.0 <8.0.0"
+  http: ^1.6.0
+  path: ^1.9.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ">=5.0.0 <7.0.0"
+  # Real profile-mode frame timing (flutter drive + TimelineSummary).
+  integration_test:
+    sdk: flutter
+  flutter_driver:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

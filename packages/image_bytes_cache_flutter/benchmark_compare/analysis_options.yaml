@@ -1,0 +1,8 @@
+# Throwaway compare harness — inherit core strictness; relax docs / line-length
+# noise for wide Markdown table strings and public corpus constants.
+include: ../../image_bytes_cache/analysis_options.yaml
+
+linter:
+  rules:
+    public_member_api_docs: false
+    lines_longer_than_80_chars: false

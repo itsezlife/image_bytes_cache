@@ -1,0 +1,7 @@
+# Flutter adapter package — same Dart strictness as the sibling core.
+#
+# Include keeps drift low with `image_bytes_cache`. Flutter widget / DCM rules
+# stay out of the shared file; this package adds `flutter_test` via pubspec
+# only. Formatter page_width remains 120 via the included config.
+
+include: ../image_bytes_cache/analysis_options.yaml
