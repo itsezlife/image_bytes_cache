@@ -5,9 +5,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Flutter paint adapters for
-[`image_bytes_cache`](../image_bytes_cache/). Widgets resolve remote image
-**bytes** through the core ladder, then paint. Ships `CachedNetworkSvgImage`
-for remote SVG. Durable storage stays in the core package.
+[`image_bytes_cache`](../image_bytes_cache/). Adapters resolve remote image
+**bytes** through the core ladder, then paint. Ships
+`CachedNetworkBytesImageProvider` for Flutter-decodable rasters and
+`CachedNetworkSvgImage` for remote SVG. Durable storage stays in the core
+package.
 
 This package does not open files, sockets, or durable stores. Hosts still call
 `ImageBytesCache.open` / `configure` on the core package before paint.
@@ -16,6 +18,10 @@ This package does not open files, sockets, or durable stores. Hosts still call
 
 - **Thin paint layer.** Depends on `IImageBytesResolver` / `ImageCacheKey` only.
   No second resolve tree, no blob IO in widgets.
+- **CachedNetworkBytesImageProvider.** Resolves via the shared ladder, decodes
+  with Flutter’s image pipeline, and maps honest download progress to
+  `ImageChunkEvent`. Compose with `Image` / `DecorationImage` like
+  `NetworkImage`.
 - **CachedNetworkSvgImage.** Loads via the shared resolver and draws with
   `SvgPicture.memory`.
 - **Scroll-friendly identity.** Optional short-lived `PageStorage` copy under
@@ -72,7 +78,34 @@ await ImageBytesCache.configure(
 See the [core README](../image_bytes_cache/README.md) for retention,
 diagnostics, and platform backends.
 
-### 2. Paint with `CachedNetworkSvgImage`
+### 2. Paint a raster with `CachedNetworkBytesImageProvider`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:image_bytes_cache_flutter/image_bytes_cache_flutter.dart';
+
+Image(
+  image: CachedNetworkBytesImageProvider(
+    'https://cdn.example.com/photo.jpg',
+    headers: const {'Authorization': 'Bearer …'},
+  ),
+  loadingBuilder: (context, child, progress) {
+    if (progress == null) return child;
+    final total = progress.expectedTotalBytes;
+    return CircularProgressIndicator(
+      value: total == null ? null : progress.cumulativeBytesLoaded / total,
+    );
+  },
+  errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image),
+);
+```
+
+Works anywhere an `ImageProvider` is accepted (`DecorationImage`,
+`CircleAvatar`, `ResizeImage`, …). Network-miss progress is real fetcher bytes;
+cache hits do not invent mid-download percents. Raster does not mirror bodies
+into `PageStorage`.
+
+### 3. Paint an SVG with `CachedNetworkSvgImage`
 
 ```dart
 import 'package:flutter/material.dart';

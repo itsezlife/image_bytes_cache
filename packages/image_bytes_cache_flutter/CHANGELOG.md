@@ -1,11 +1,12 @@
 ## Unreleased
 
-- **CHANGED**: Glossary and agent orientation now describe the planned raster
-  paint surface (`CachedNetworkBytesImageProvider` /
-  `CachedNetworkBytesImage`): ImageProvider-first decode, optional sized
-  Flutter `ImageCache` identity, no PageStorage body mirror, and progress via
-  core `onBytesProgress` — SVG remains a separate adapter. Implementation of
-  those types follows in this foundation train.
+- **ADDED**: `CachedNetworkBytesImageProvider` — ImageProvider over
+  `IImageBytesResolver` for Flutter-decodable rasters (PNG/JPEG/WebP/GIF and
+  siblings). Maps honest ladder `onBytesProgress` to `ImageChunkEvent`; Flutter
+  `ImageCache` identity is `ImageCacheKey` + scale (durable key stays
+  `ImageCacheKey` only); no PageStorage body mirror. Injected resolver for
+  tests. Thin `CachedNetworkBytesImage` and sized-decode key still land later
+  in this foundation train.
 
 ## 0.0.2
 
