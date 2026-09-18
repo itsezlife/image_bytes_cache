@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:image_bytes_cache/src/environment_specific/image_bytes_blob_store_web_js.dart';
+import 'package:image_bytes_cache/src/environment_specific/image_bytes_blob_store_routed_js.dart';
 import 'package:image_bytes_cache/src/environment_specific/image_bytes_index_cache_js.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 
@@ -21,11 +21,11 @@ Future<IImageBytesCache> $openImageBytesCache({
   ImageBytesRetention retention = ImageBytesRetention.standard,
   DateTime Function()? clock,
 }) async {
-  ImageBytesBlobStore$Web$JS? blobs;
+  ImageBytesBlobStore$Routed$JS? blobs;
   ImageBytesIndex$Cache$JS? index;
   ImageBytesCache$JS? opened;
   try {
-    blobs = await ImageBytesBlobStore$Web$JS.open();
+    blobs = await ImageBytesBlobStore$Routed$JS.open();
     index = await ImageBytesIndex$Cache$JS.open(onWipe: blobs.wipeAll);
 
     opened = ImageBytesCache$JS(
@@ -60,14 +60,14 @@ final class ImageBytesCache$JS implements IImageBytesCache {
   ImageBytesCache$JS({
     required IndexedImageBytesCache inner,
     required ImageBytesIndex$Cache$JS index,
-    required ImageBytesBlobStore$Web$JS blobs,
+    required ImageBytesBlobStore$Routed$JS blobs,
   }) : _inner = inner,
        _index = index,
        _blobs = blobs;
 
   final IndexedImageBytesCache _inner;
   final ImageBytesIndex$Cache$JS _index;
-  final ImageBytesBlobStore$Web$JS _blobs;
+  final ImageBytesBlobStore$Routed$JS _blobs;
 
   Future<void> reclaimOrphans() => _inner.reclaimOrphans();
 

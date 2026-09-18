@@ -1,5 +1,8 @@
 ## 0.0.2
 
+- **FIXED**: VM blob isolate death fails in-flight RPCs with `StateError`
+  instead of hanging, drops the dead worker so later ops can respawn, and
+  keeps the exclusive mutate gate from stalling on a dead worker.
 - **FIXED**: Ladder soft-failure hygiene — empty durable writes are not retained
   (treated as eviction); sticky empty rows scrub on read; non-positive
   `maxEntries` / `maxBytes` assert; throwing diagnostics `onEvent` is swallowed

@@ -16,8 +16,8 @@ import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 /// resize across the threshold cannot leave a stale twin. [read] checks Cache
 /// then OPFS. [reclaimOrphans] / [wipeAll] cover both backends under the brain's
 /// exclusive domain. No IsolateController on this path.
-final class ImageBytesBlobStore$Web$JS implements IImageBytesBlobStore {
-  ImageBytesBlobStore$Web$JS._({
+final class ImageBytesBlobStore$Routed$JS implements IImageBytesBlobStore {
+  ImageBytesBlobStore$Routed$JS._({
     required ImageBytesBlobStore$Cache$JS cache,
     required ImageBytesBlobStore$Opfs$JS opfs,
   }) : _cache = cache,
@@ -35,11 +35,11 @@ final class ImageBytesBlobStore$Web$JS implements IImageBytesBlobStore {
   var _closed = false;
 
   /// Opens Cache API and OPFS payload backends.
-  static Future<ImageBytesBlobStore$Web$JS> open() async {
+  static Future<ImageBytesBlobStore$Routed$JS> open() async {
     final cache = await ImageBytesBlobStore$Cache$JS.open();
     try {
       final opfs = await ImageBytesBlobStore$Opfs$JS.open();
-      return ImageBytesBlobStore$Web$JS._(cache: cache, opfs: opfs);
+      return ImageBytesBlobStore$Routed$JS._(cache: cache, opfs: opfs);
     } on Object {
       await cache.close();
       rethrow;
@@ -98,7 +98,7 @@ final class ImageBytesBlobStore$Web$JS implements IImageBytesBlobStore {
 
   void _ensureOpen() {
     if (_closed) {
-      throw StateError(r'ImageBytesBlobStore$Web$JS is closed');
+      throw StateError(r'ImageBytesBlobStore$Routed$JS is closed');
     }
   }
 }

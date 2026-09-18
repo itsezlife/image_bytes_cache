@@ -10,7 +10,7 @@ library;
 import 'dart:js_interop';
 import 'dart:typed_data';
 
-import 'package:image_bytes_cache/src/environment_specific/image_bytes_blob_store_web_js.dart';
+import 'package:image_bytes_cache/src/environment_specific/image_bytes_blob_store_routed_js.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 import 'package:image_bytes_cache/src/image_bytes_web_keys.dart';
 import 'package:test/test.dart';
@@ -85,7 +85,7 @@ void main() {
 
     test('payload at or above threshold round-trips via OPFS', () async {
       const key = ImageCacheKey('large_raster');
-      final bytes = _filled(ImageBytesBlobStore$Web$JS.opfsByteThreshold, 7);
+      final bytes = _filled(ImageBytesBlobStore$Routed$JS.opfsByteThreshold, 7);
 
       final first = await ImageBytesCache.open(
         retention: const ImageBytesRetention.unlimited(),
@@ -107,7 +107,7 @@ void main() {
     test('rewrite across threshold moves the body between backends', () async {
       const key = ImageCacheKey('resize');
       final small = Uint8List.fromList([9, 8, 7]);
-      final large = _filled(ImageBytesBlobStore$Web$JS.opfsByteThreshold, 3);
+      final large = _filled(ImageBytesBlobStore$Routed$JS.opfsByteThreshold, 3);
 
       final cache = await ImageBytesCache.open(
         retention: const ImageBytesRetention.unlimited(),

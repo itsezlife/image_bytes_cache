@@ -22,7 +22,12 @@ import 'package:path/path.dart' as p;
 /// copy. Smaller bodies stay plain [Uint8List] (transferable setup would cost
 /// more than it saves). Writes go to `path.tmp` then rename. A crash mid-write
 /// leaves a temp (or nothing), never a truncated final path that [read] would
-/// treat as a hit. [close] kills the worker; later calls throw [StateError].
+/// treat as a hit.
+///
+/// When the worker dies (watchdog, `#exit`, or [debugKillWorker]), in-flight
+/// RPC futures complete with [StateError] instead of hanging, the dead
+/// controller is dropped, and a later op may respawn. [close] still fails
+/// pending with a closed [StateError] and refuses further RPCs.
 final class ImageBytesBlobStore$File$VM implements IImageBytesBlobStore {
   /// Roots the store at [directory]. The directory is created on
   /// [ensureDirectory] / first write, not in this constructor.
@@ -52,6 +57,19 @@ final class ImageBytesBlobStore$File$VM implements IImageBytesBlobStore {
   /// cleanup: spawn increments, [close] decrements when a worker was live.
   @visibleForTesting
   static int debugActiveWorkerCount = 0;
+
+  /// Test seam: kill the live isolate worker without closing the store.
+  ///
+  /// Production death (watchdog / `#exit`) takes the same fail-pending path
+  /// via stream `onDone`. Pending RPCs must fail fast; later ops may respawn.
+  @visibleForTesting
+  void debugKillWorker() {
+    final controller = _controller;
+    if (controller == null) return;
+    controller.close();
+    // Fail pending synchronously; do not wait for stream onDone microtask.
+    _onWorkerGone();
+  }
 
   String _pathFor(ImageCacheKey key) => p.join(directory, key.value);
 
@@ -157,14 +175,7 @@ final class ImageBytesBlobStore$File$VM implements IImageBytesBlobStore {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
-    for (final completer in _pending.values) {
-      if (!completer.isCompleted) {
-        completer.completeError(
-          StateError(r'ImageBytesBlobStore$File$VM is closed'),
-        );
-      }
-    }
-    _pending.clear();
+    _failPending(StateError(r'ImageBytesBlobStore$File$VM is closed'));
     await _subscription?.cancel();
     _subscription = null;
     if (_controller != null) {
@@ -182,7 +193,17 @@ final class ImageBytesBlobStore$File$VM implements IImageBytesBlobStore {
     final controller = await _ensureSpawned();
     final id = _nextId++;
     final completer = Completer<_BlobIoResponse>();
+    // Register before add so a death that lands in this window still fails
+    // the completer. If the controller was already dropped, retry on a fresh
+    // spawn instead of talking to a dead port.
     _pending[id] = completer;
+    if (!identical(_controller, controller)) {
+      _pending.remove(id);
+      if (_closed) {
+        throw StateError(r'ImageBytesBlobStore$File$VM is closed');
+      }
+      return _rpc(template);
+    }
     controller.add((
       id: id,
       op: template.op,
@@ -217,20 +238,76 @@ final class ImageBytesBlobStore$File$VM implements IImageBytesBlobStore {
         payload: null,
         name: 'image_bytes_blob_io',
       );
-      _subscription = controller.stream.listen(_onResponse);
+      _subscription = controller.stream.listen(
+        _onResponse,
+        onError: (Object error, StackTrace stackTrace) {
+          _onWorkerGone(error, stackTrace);
+        },
+        onDone: _onWorkerGone,
+        cancelOnError: false,
+      );
       _controller = controller;
       debugActiveWorkerCount++;
       completer.complete();
       return controller;
     } on Object catch (error, stackTrace) {
-      _spawning = null;
       completer.completeError(error, stackTrace);
       rethrow;
+    } finally {
+      if (identical(_spawning, completer)) {
+        _spawning = null;
+      }
     }
   }
 
   void _onResponse(_BlobIoResponse response) {
     _pending.remove(response.id)?.complete(response);
+  }
+
+  /// Watchdog / `#exit` / [debugKillWorker] close the isolate stream.
+  ///
+  /// Without failing [_pending], hosts (and the exclusive mutate gate) hang
+  /// forever on in-flight RPCs. Dropping [_controller] lets a later [_rpc]
+  /// respawn; [close] still owns the closed [StateError] path.
+  void _onWorkerGone([Object? error, StackTrace? stackTrace]) {
+    if (_closed) return;
+
+    final controller = _controller;
+    _controller = null;
+    final subscription = _subscription;
+    _subscription = null;
+    _spawning = null;
+
+    subscription?.cancel().ignore();
+
+    if (controller != null) {
+      debugActiveWorkerCount--;
+      // Stream may already be closed (onDone); close is still safe enough to
+      // cancel watchdog / kill if we arrived via onError alone.
+      controller.close();
+    }
+
+    _failPending(
+      switch (error) {
+        null => StateError(r'ImageBytesBlobStore$File$VM worker died'),
+        final StateError e => e,
+        final Object e => StateError(
+          'ImageBytesBlobStore\$File\$VM worker died: $e',
+        ),
+      },
+      stackTrace,
+    );
+  }
+
+  void _failPending(Object error, [StackTrace? stackTrace]) {
+    if (_pending.isEmpty) return;
+    final pending = Map<int, Completer<_BlobIoResponse>>.of(_pending);
+    _pending.clear();
+    for (final completer in pending.values) {
+      if (!completer.isCompleted) {
+        completer.completeError(error, stackTrace);
+      }
+    }
   }
 }
 

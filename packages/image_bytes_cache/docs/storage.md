@@ -77,11 +77,11 @@ Sealed `ImageBytesRetention`. TTL is checked on `read`. Capacity is trimmed on
 
 `ImageBytesRetention.standard` (default for `open`):
 
-| Limit | Value |
-| --- | --- |
-| `maxAge` | 14 days |
-| `maxEntries` | 500 |
-| `maxBytes` | 50 MiB |
+| Limit        | Value   |
+| ------------ | ------- |
+| `maxAge`     | 14 days |
+| `maxEntries` | 500     |
+| `maxBytes`   | 50 MiB  |
 
 Entry count alone would let a few large assets fill the device. The byte
 budget bounds that without a timer. Hosts may pass `compound`, `maxAge`,
@@ -99,10 +99,10 @@ one under `maxEntries`.
 
 ## Orphans
 
-| Case | When | Action |
-| --- | --- | --- |
-| Index without blob | Shared `read` probe | Upgrade to exclusive; delete index row; `commit` |
-| Blob without index | Open / `prune` / `reclaimOrphans` | Platform reclaim under exclusive gate |
+| Case               | When                              | Action                                           |
+| ------------------ | --------------------------------- | ------------------------------------------------ |
+| Index without blob | Shared `read` probe               | Upgrade to exclusive; delete index row; `commit` |
+| Blob without index | Open / `prune` / `reclaimOrphans` | Platform reclaim under exclusive gate            |
 
 Remote bytes are disposable: corrupt recovery prefers wipe over crash loops.
 
@@ -122,15 +122,22 @@ encode/decode through the codec (fused UTF-8 JSON converters), not peel
 
 ## VM durable path
 
-| Half | Implementation |
-| --- | --- |
+| Half  | Implementation                                                        |
+| ----- | --------------------------------------------------------------------- |
 | Index | Versioned JSON file; RAM mirror; `commit` via the blob isolate worker |
-| Blobs | One file per `ImageCacheKey.value` under the open directory |
+| Blobs | One file per `ImageCacheKey.value` under the open directory           |
 
 IO runs on a long-lived in-package `IsolateController` worker
 (`lib/src/isolate_controller.dart`). Sync `dart:io` stays off the UI
 isolate. Writes use temp then rename so a crash mid-write cannot leave a
 truncated final path that `read` would treat as a hit.
+
+When the worker dies (watchdog threshold, handler `#exit`, or an explicit
+kill), `ImageBytesBlobStore$File$VM` fails in-flight RPC futures with
+`StateError`, drops the dead controller, and allows a later op to respawn.
+That fail-fast path keeps the exclusive mutate gate from stalling forever on
+a hung blob future. Store `close` still fails pending with a closed
+`StateError` and refuses further RPCs.
 
 Bodies at or above `ImageBytesBlobStore$File$VM.transferByteThreshold`
 (64 KiB) cross the isolate boundary as `TransferableTypedData`. Smaller bodies
@@ -142,13 +149,13 @@ No per-write `compute`.
 
 ## Web durable path
 
-| Half | Implementation |
-| --- | --- |
-| Index | One Cache API JSON document (`ImageBytesWebKeys.indexCacheName`) |
-| Blobs under 64 KiB | Cache API Responses with synthetic `.invalid` URLs |
-| Blobs at or above 64 KiB | OPFS files under `opfsBlobsDirectoryName` |
+| Half                     | Implementation                                                   |
+| ------------------------ | ---------------------------------------------------------------- |
+| Index                    | One Cache API JSON document (`ImageBytesWebKeys.indexCacheName`) |
+| Blobs under 64 KiB       | Cache API Responses with synthetic `.invalid` URLs               |
+| Blobs at or above 64 KiB | OPFS files under `opfsBlobsDirectoryName`                        |
 
-`ImageBytesBlobStore$Web$JS.opfsByteThreshold` is 64 KiB, matching the VM
+`ImageBytesBlobStore$Routed$JS.opfsByteThreshold` is 64 KiB, matching the VM
 transferable cut so “small chrome vs large raster” is one documented size
 policy. Writes route by length and delete the key from the other backend so a
 resize across the threshold cannot leave a stale twin. Reads check Cache then

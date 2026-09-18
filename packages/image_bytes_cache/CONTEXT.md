@@ -41,7 +41,8 @@ Split ports: retention meta vs payload bytes. Index is a RAM mirror after
 open: put/delete do not persist; `commit` writes the durable document once per
 epoch. VM: versioned JSON index file + one file per key behind
 IsolateController; large blob writes use TransferableTypedData above a
-documented threshold. Web: Cache API index document; blobs under 64 KiB use
+documented threshold. Worker death fails in-flight blob RPCs (no hang) and
+drops the dead controller so later ops can respawn. Web: Cache API index document; blobs under 64 KiB use
 Cache API with synthetic `.invalid` keys; blobs at or above 64 KiB use OPFS
 files (same cut as the VM transferable threshold). Index document bytes go
 through [ImageBytesIndexDocumentCodec] (`Map` ↔ UTF-8 JSON bytes via fused

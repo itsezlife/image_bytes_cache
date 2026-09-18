@@ -7,7 +7,7 @@ import 'package:web/web.dart' as web;
 
 /// Cache API half of the web blob store: Responses for small payloads.
 ///
-/// Owned by [ImageBytesBlobStore$Web$JS], which routes large bodies to OPFS.
+/// Owned by [ImageBytesBlobStore$Routed$JS], which routes large bodies to OPFS.
 /// Retention and timestamps stay on [ImageBytesIndex$Cache$JS]. This type owns
 /// one named Cache ([ImageBytesWebKeys.blobsCacheName]). Keys are synthetic
 /// absolute URLs from [ImageBytesWebKeys.blobUrl] so payloads never share

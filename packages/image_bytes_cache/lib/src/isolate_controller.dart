@@ -40,6 +40,9 @@ typedef IsolateHandler<Payload, In, Out> =
 /// A 1s timer pings the isolate. If sent pings exceed received echoes by more
 /// than five, the host assumes the worker is dead and [close]s. Counters wrap
 /// at `1 << 16` so they do not grow without bound on a long-lived worker.
+/// [close] (watchdog or `#exit`) closes [stream]; hosts that map replies to
+/// pending completers must fail those completers on stream done/error so RPCs
+/// do not hang (VM blob store does this).
 ///
 /// ## Why this shape
 ///
@@ -62,7 +65,9 @@ final class IsolateController<In, Out> {
   final void Function(In data) add;
 
   /// Cancels the watchdog, closes ports/subscriptions, and [Isolate.kill]s
-  /// the worker. Pending host-side RPC completers are the caller's problem.
+  /// the worker with [Isolate.immediate] so a worker blocked in sync IO cannot
+  /// outlive the host. Closes [stream] so hosts can fail pending RPC
+  /// completers; this type does not track host-side request IDs.
   final void Function() close;
 
   static Future<void> _$entryPoint<Payload, In, Out>(
@@ -107,7 +112,7 @@ final class IsolateController<In, Out> {
       receivePort.close();
       rcvSubscription.cancel().ignore();
       outputController.close().ignore();
-      isolate.kill();
+      isolate.kill(priority: Isolate.immediate);
     }
 
     // Two counters + threshold (sent − received > 5 ⇒ dead), not a single bool.
