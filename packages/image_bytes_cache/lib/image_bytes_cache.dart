@@ -7,7 +7,8 @@
 /// resolve via [ImageBytesResolver] (cache → network coalesce → write-through).
 ///
 /// Wire shared instances with [ImageBytesCache.configure] /
-/// [ImageBytesCache.open]. Soft storage failures report through
+/// [ImageBytesCache.open] and optionally [HttpBytesFetcher.configure] for a
+/// process-wide HTTP client. Soft storage failures report through
 /// [ImageBytesDiagnostics]. Open degrades to an in-memory store on hard
 /// failure unless [ImageBytesCache.open] is called with
 /// `throwOnOpenFailure: true`. Hosts bridge diagnostics; this package does

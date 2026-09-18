@@ -6,6 +6,10 @@
   HTTP body is read on a network miss. Durable cache hits do not synthesize
   mid-download progress. Resolve stays a single `Future<Uint8List>`. No public
   streaming resolve API; coalesce and `ImageCacheKey` identity are unchanged.
+- **ADDED**: `HttpBytesFetcher.configure` / `resetShared` for process-wide HTTP
+  client bootstrap (mirrors `ImageBytesCache.configure`). Hosts inject a custom
+  `http.Client` once; `ImageBytesResolver.shared` re-reads it on each resolve.
+  `ImageBytesCache.resetShared` also clears fetcher shared wiring via hooks.
 
 ## 0.0.2
 

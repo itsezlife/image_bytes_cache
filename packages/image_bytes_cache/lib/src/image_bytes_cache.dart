@@ -1085,9 +1085,9 @@ abstract final class ImageBytesCache {
   /// Closes the previous shared instance, then clears [configure] and
   /// [debugShared], and resets diagnostics to silent.
   ///
-  /// Also invokes any registered ladder cleanup (see
-  /// [ImageBytesCache.afterResetShared]) so resolver shared wiring can clear
-  /// without this facade importing the resolver library.
+  /// Also invokes registered ladder cleanup hooks (see
+  /// [addAfterResetShared]) so resolver / fetcher shared wiring can clear
+  /// without this facade importing those libraries.
   @visibleForTesting
   static Future<void> resetShared() async {
     final previous = _shared;
@@ -1095,13 +1095,19 @@ abstract final class ImageBytesCache {
     ImageBytesDiagnostics.current = const ImageBytesDiagnostics.silent();
     await previous?.close();
     _shared = null;
-    afterResetShared?.call();
+    for (final hook in List<FutureOr<void> Function()>.of(_afterResetSharedHooks)) {
+      await hook();
+    }
   }
 
-  /// Optional cleanup after [resetShared] (resolver memo / debug override).
+  static final List<FutureOr<void> Function()> _afterResetSharedHooks = [];
+
+  /// Registers cleanup after [resetShared] (resolver memo, fetcher shared, …).
   ///
-  /// Set by the resolver library so the store facade does not import the
-  /// ladder above it. Package-internal.
+  /// Hooks are package-internal so the store facade does not import the ladder
+  /// above it. Idempotent registration is the caller's responsibility.
   @internal
-  static void Function()? afterResetShared;
+  static void addAfterResetShared(FutureOr<void> Function() hook) {
+    _afterResetSharedHooks.add(hook);
+  }
 }

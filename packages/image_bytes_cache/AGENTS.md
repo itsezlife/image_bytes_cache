@@ -95,7 +95,7 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
   degrade or rethrow. Missing VM `directory` still throws. `configure`
   closes the previous shared instance before assign. `ImageBytesResolver.shared`
   re-reads process-wide cache/fetcher on each resolve (no one-shot snapshot).
-  `resetShared` also clears resolver shared wiring.
+  `resetShared` also clears resolver and fetcher shared wiring.
 - **Retention:** TTL on read; capacity on write/prune; no background timer.
   `standard` = 14 days / 500 entries / 50 MiB. Non-positive `maxEntries` /
   `maxBytes` assert.

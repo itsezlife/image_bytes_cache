@@ -141,11 +141,19 @@ The package does not depend on a product logger. Hosts bridge
 assign so workers and Cache handles do not leak across reconfigure.
 `shared()` returns `NoOpImageBytesCache` until configure (or `debugShared`).
 `resetShared` (tests) closes, clears configure and debug overrides, resets
-diagnostics to silent, and clears `ImageBytesResolver` shared wiring.
+diagnostics to silent, and clears `ImageBytesResolver` / `HttpBytesFetcher`
+shared wiring via registered hooks.
 
-Bootstrap order: open (with diagnostics) → configure → paint via
-`ImageBytesResolver.shared()` (typically from `image_bytes_cache_flutter`
-widgets or an injected resolver). Calling shared resolve **before** configure
-is safe: later configure is visible on the next resolve. Resolver and fetcher
-shared factories stay thin; do not invent a fourth process-wide global for the
-same ladder.
+`HttpBytesFetcher.configure(fetcher)` mirrors the same close-then-assign rule
+for the process-wide HTTP client (pool + owned client). Hosts that want
+Cronet / Cupertino / a shared `IOClient` bootstrap once here; paint widgets
+that default to `ImageBytesResolver.shared()` pick it up without threading a
+fetcher. `HttpBytesFetcher.shared()` returns `debugShared`, else the
+configured instance, else a lazily constructed default.
+
+Bootstrap order: open (with diagnostics) → configure cache → optionally
+configure fetcher → paint via `ImageBytesResolver.shared()` (typically from
+`image_bytes_cache_flutter` widgets or an injected resolver). Calling shared
+resolve **before** configure is safe: later configure is visible on the next
+resolve. Resolver and fetcher shared factories stay thin; do not invent a
+fourth process-wide global for the same ladder.

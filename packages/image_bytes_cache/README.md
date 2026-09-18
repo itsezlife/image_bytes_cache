@@ -60,6 +60,10 @@ await ImageBytesCache.configure(
     diagnostics: const ImageBytesDiagnostics.silent(),
   ),
 );
+
+// Optional: process-wide HTTP client (Cronet / Cupertino / shared IOClient).
+// Omit to use the default `http.Client()`.
+// await HttpBytesFetcher.configure(HttpBytesFetcher(client: myClient));
 ```
 
 ### Resolve bytes
@@ -74,7 +78,7 @@ final bytes = await ImageBytesResolver.shared().resolve(
 
 For Flutter paint, use
 [`image_bytes_cache_flutter`](../image_bytes_cache_flutter/) after the same
-`open` / `configure` call.
+`open` / `configure` call (and optional fetcher configure).
 
 ## Resolve ladder
 

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:image_bytes_cache/src/http_bytes_fetcher.dart';
+import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -299,6 +300,72 @@ void main() {
       );
 
       expect(bytes, Uint8List.fromList([1, 2, 3]));
+    });
+  });
+
+  group('HttpBytesFetcher.configure', () {
+    tearDown(() async {
+      await HttpBytesFetcher.resetShared();
+    });
+
+    test('closes the previous shared instance before replace', () async {
+      final first = HttpBytesFetcher(
+        client: MockClient(
+          (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
+        ),
+      );
+      final second = HttpBytesFetcher(
+        client: MockClient(
+          (_) async => http.Response.bytes(Uint8List.fromList([2]), 200),
+        ),
+      );
+
+      await HttpBytesFetcher.configure(first);
+      expect(identical(HttpBytesFetcher.shared(), first), isTrue);
+
+      await HttpBytesFetcher.configure(second);
+      expect(identical(HttpBytesFetcher.shared(), second), isTrue);
+      expect(
+        () => first.getBytes(Uri.parse('https://cdn.example.com/closed.svg')),
+        throwsA(isA<StateError>()),
+        reason: 'configure must close the previous fetcher',
+      );
+    });
+
+    test('resetShared closes then clears', () async {
+      final fetcher = HttpBytesFetcher(
+        client: MockClient(
+          (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
+        ),
+      );
+      await HttpBytesFetcher.configure(fetcher);
+
+      await HttpBytesFetcher.resetShared();
+      expect(
+        () => fetcher.getBytes(Uri.parse('https://cdn.example.com/closed.svg')),
+        throwsA(isA<StateError>()),
+      );
+      expect(
+        identical(HttpBytesFetcher.shared(), fetcher),
+        isFalse,
+        reason: 'shared must not keep returning the closed instance',
+      );
+    });
+
+    test('ImageBytesCache.resetShared also clears the configured fetcher', () async {
+      final fetcher = HttpBytesFetcher(
+        client: MockClient(
+          (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
+        ),
+      );
+      await HttpBytesFetcher.configure(fetcher);
+
+      await ImageBytesCache.resetShared();
+      expect(
+        () => fetcher.getBytes(Uri.parse('https://cdn.example.com/closed.svg')),
+        throwsA(isA<StateError>()),
+        reason: 'cache resetShared must tear down fetcher shared wiring',
+      );
     });
   });
 }

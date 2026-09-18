@@ -404,6 +404,12 @@ void main() {
 
       await ImageBytesCache.resetShared();
 
+      // resetShared clears fetcher debugShared too; re-install a mock for the
+      // post-reset resolve (no public internet in this suite).
+      HttpBytesFetcher.debugShared = HttpBytesFetcher(
+        client: MockClient((_) async => http.Response.bytes(body, 200)),
+      );
+
       final second = MemoryImageBytesCache();
       await ImageBytesCache.configure(second);
       await ImageBytesResolver.shared().resolve(
@@ -415,6 +421,22 @@ void main() {
         await second.read(ImageCacheKey.fromUrl('https://cdn.example.com/after-reset.svg')),
         body,
       );
+    });
+
+    test('HttpBytesFetcher.configure is visible to shared resolve without injecting a resolver', () async {
+      final body = Uint8List.fromList([4, 5, 6]);
+      await ImageBytesCache.configure(MemoryImageBytesCache());
+      await HttpBytesFetcher.configure(
+        HttpBytesFetcher(
+          client: MockClient((_) async => http.Response.bytes(body, 200)),
+        ),
+      );
+
+      final bytes = await ImageBytesResolver.shared().resolve(
+        const ImageBytesRequest(url: 'https://cdn.example.com/configured-fetcher.svg'),
+      );
+
+      expect(bytes, body);
     });
   });
 }

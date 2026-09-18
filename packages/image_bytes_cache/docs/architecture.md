@@ -54,6 +54,7 @@ await ImageBytesCache.configure(
     diagnostics: hostDiagnosticsPolicy,
   ),
 );
+// Optional: await HttpBytesFetcher.configure(HttpBytesFetcher(client: hostClient));
 ```
 
 On web, `directory` is ignored. Hard storage failure returns

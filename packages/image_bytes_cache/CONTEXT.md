@@ -84,6 +84,8 @@ HTTP GET with concurrency pool and in-flight coalesce by `ImageCacheKey` identit
 `AbortableRequest` (aborts when the client honors it). Pool wait for a slot is
 intentionally unbounded. When a progress sink is supplied, reports cumulative
 bytes as the response body is read (total when the response provides it).
+Process-wide `configure` / `shared` / `resetShared` mirror the cache facade so
+hosts can inject a custom `http.Client` once at bootstrap.
 _Avoid_: homemade download queues; Mutex for N-way downloads; `url|headers`
 string joins for coalesce; assuming timeout covers pool queue time; synthetic
 chunk percents after the body is already fully buffered
@@ -102,8 +104,9 @@ Host wiring. VM `directory` must be under a reclaimable cache root. Web ignores
 `throwOnOpenFailure` is set; platform open closes any partial worker / web
 handles first. Missing VM directory still throws. `configure` closes the
 previous instance before assign; `resetShared` closes then clears, including
-`ImageBytesResolver` shared wiring. `ImageBytesResolver.shared` looks up the
-current shared cache/fetcher on each resolve (not a one-shot snapshot).
+`ImageBytesResolver` and `HttpBytesFetcher` shared wiring. `ImageBytesResolver.shared`
+looks up the current shared cache/fetcher on each resolve (not a one-shot
+snapshot).
 _Avoid_: documents/support paths for remote image bytes; Config paths inside
 package open code; letting open throw kill bootstrap when storage is optional;
 assuming first `shared().resolve` permanently binds NoOp

@@ -115,7 +115,7 @@ final class ImageBytesResolver implements IImageBytesResolver {
 
   /// Clears the memoized [shared] instance and [debugShared].
   ///
-  /// Registered on [ImageBytesCache.afterResetShared] so test re-bootstrap
+  /// Registered via [ImageBytesCache.addAfterResetShared] so test re-bootstrap
   /// cannot keep a stale override without the store facade importing this
   /// library. Live wiring already re-reads the cache; this only drops the
   /// resolver singleton / debug override.
@@ -130,7 +130,7 @@ final class ImageBytesResolver implements IImageBytesResolver {
   static void _$ensureResetSharedCleanup() {
     if (_$resetSharedCleanupInstalled) return;
     _$resetSharedCleanupInstalled = true;
-    ImageBytesCache.afterResetShared = resetShared;
+    ImageBytesCache.addAfterResetShared(resetShared);
   }
 
   final IImageBytesCache Function() _cacheOf;

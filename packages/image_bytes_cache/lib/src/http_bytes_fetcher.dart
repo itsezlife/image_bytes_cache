@@ -62,13 +62,61 @@ final class HttpBytesFetcher {
        _pool = Pool(maxConcurrent);
 
   /// Process-wide default when nothing is injected.
-  factory HttpBytesFetcher.shared() => debugShared ?? (_shared ??= HttpBytesFetcher());
+  ///
+  /// Returns [debugShared] when set, else the instance from [configure], else
+  /// lazily constructs a default [HttpBytesFetcher] (owns an [http.Client]).
+  factory HttpBytesFetcher.shared() {
+    _$ensureResetSharedCleanup();
+    return debugShared ?? (_shared ??= HttpBytesFetcher());
+  }
 
   static HttpBytesFetcher? _shared;
 
   /// Test override for [HttpBytesFetcher.shared]. Set to `null` to clear.
   @visibleForTesting
   static HttpBytesFetcher? debugShared;
+
+  /// Sets the process-wide fetcher (bootstrap).
+  ///
+  /// Closes any previous non-identical [_shared] instance **before** assign so
+  /// pools and owned clients do not leak across reconfigure. Pass a fetcher
+  /// built with your app [http.Client] (for example Cronet / Cupertino /
+  /// [http.IOClient]) once at startup; [ImageBytesResolver.shared] re-reads
+  /// this on every resolve, so widgets need not thread a fetcher.
+  ///
+  /// Does not clear [debugShared]; when that override is set, [shared] still
+  /// prefers it (same rule as [ImageBytesCache.configure]).
+  static Future<void> configure(HttpBytesFetcher fetcher) async {
+    _$ensureResetSharedCleanup();
+    final previous = _shared;
+    if (previous != null && !identical(previous, fetcher)) {
+      await previous.close();
+    }
+    _shared = fetcher;
+  }
+
+  /// Closes the previous shared instance, then clears [configure] and
+  /// [debugShared].
+  ///
+  /// Registered via [ImageBytesCache.addAfterResetShared] so
+  /// [ImageBytesCache.resetShared] also tears down the process-wide fetcher.
+  /// Prefer this (or cache [ImageBytesCache.resetShared]) over calling [close]
+  /// alone on the shared instance when clearing process globals in tests.
+  @visibleForTesting
+  static Future<void> resetShared() async {
+    final previous = _shared;
+    debugShared = null;
+    await previous?.close();
+    _shared = null;
+  }
+
+  static var _$resetSharedCleanupInstalled = false;
+
+  static void _$ensureResetSharedCleanup() {
+    if (_$resetSharedCleanupInstalled) return;
+    _$resetSharedCleanupInstalled = true;
+    ImageBytesCache.addAfterResetShared(resetShared);
+  }
 
   final http.Client _client;
   final bool _ownsClient;
@@ -199,16 +247,16 @@ final class HttpBytesFetcher {
   /// Closes the pool and, when this instance created the client, the client.
   ///
   /// Idempotent. In-flight GETs may still finish or fail after close; new
-  /// [getBytes] calls throw.
+  /// [getBytes] calls throw. Does **not** clear the process-wide [shared]
+  /// slot — use [configure] or [resetShared] (or [ImageBytesCache.resetShared])
+  /// so [shared] stays stable until close finishes, matching
+  /// [ImageBytesCache.configure].
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
     await _pool.close();
     if (_ownsClient) {
       _client.close();
-    }
-    if (identical(_shared, this)) {
-      _shared = null;
     }
   }
 }
