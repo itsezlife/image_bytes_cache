@@ -20,8 +20,10 @@ This package does not open files, sockets, or durable stores. Hosts still call
   No second resolve tree, no blob IO in widgets.
 - **CachedNetworkBytesImageProvider.** Resolves via the shared ladder, decodes
   with Flutter’s image pipeline, and maps honest download progress to
-  `ImageChunkEvent`. Compose with `Image` / `DecorationImage` like
-  `NetworkImage`.
+  `ImageChunkEvent`. Optional `cacheWidth` / `cacheHeight` (or `.sized`)
+  participate in Flutter `ImageCache` identity only. Compose with `Image` /
+  `DecorationImage` like `NetworkImage`; `ResizeImage` wrapping stays valid on
+  unsized providers.
 - **CachedNetworkSvgImage.** Loads via the shared resolver and draws with
   `SvgPicture.memory`.
 - **Scroll-friendly identity.** Optional short-lived `PageStorage` copy under
@@ -101,9 +103,26 @@ Image(
 ```
 
 Works anywhere an `ImageProvider` is accepted (`DecorationImage`,
-`CircleAvatar`, `ResizeImage`, …). Network-miss progress is real fetcher bytes;
-cache hits do not invent mid-download percents. Raster does not mirror bodies
-into `PageStorage`.
+`CircleAvatar`, …). Pass `cacheWidth` / `cacheHeight` (or use
+`CachedNetworkBytesImageProvider.sized`) so Flutter’s `ImageCache` holds
+display-sized bitmaps — a 32px avatar and a large preview of the same URL do
+not thrash each other. Decode size never changes durable `ImageCacheKey` /
+HTTP coalesce. Wrapping an **unsized** provider in `ResizeImage` remains
+valid; do not stack `ResizeImage` on a provider that already sets decode size.
+Network-miss progress is real fetcher bytes; cache hits do not invent
+mid-download percents. Raster does not mirror bodies into `PageStorage`.
+
+```dart
+Image(
+  image: CachedNetworkBytesImageProvider.sized(
+    'https://cdn.example.com/photo.jpg',
+    cacheWidth: 64,
+    cacheHeight: 64,
+  ),
+  width: 64,
+  height: 64,
+);
+```
 
 ### 3. Paint an SVG with `CachedNetworkSvgImage`
 

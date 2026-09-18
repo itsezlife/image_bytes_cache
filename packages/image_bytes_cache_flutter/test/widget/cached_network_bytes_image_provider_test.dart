@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -263,6 +264,55 @@ void main() {
       );
     });
 
+    test(
+      'Flutter image-cache identity splits when decode size differs for same URL',
+      () {
+        const fullRes = CachedNetworkBytesImageProvider(
+          'https://cdn.example.com/photo.png',
+          headers: {'Authorization': 't'},
+        );
+        const avatar = CachedNetworkBytesImageProvider.sized(
+          'https://cdn.example.com/photo.png',
+          cacheWidth: 32,
+          cacheHeight: 32,
+          headers: {'Authorization': 't'},
+        );
+        const preview = CachedNetworkBytesImageProvider.sized(
+          'https://cdn.example.com/photo.png',
+          cacheWidth: 512,
+          headers: {'Authorization': 't'},
+        );
+        const sameAvatar = CachedNetworkBytesImageProvider(
+          'https://cdn.example.com/photo.png',
+          cacheWidth: 32,
+          cacheHeight: 32,
+          headers: {'authorization': 't'},
+        );
+        const upscaled = CachedNetworkBytesImageProvider.sized(
+          'https://cdn.example.com/photo.png',
+          cacheWidth: 32,
+          cacheHeight: 32,
+          allowUpscaling: true,
+          headers: {'Authorization': 't'},
+        );
+
+        expect(avatar, equals(sameAvatar));
+        expect(avatar.hashCode, sameAvatar.hashCode);
+        expect(fullRes, isNot(equals(avatar)));
+        expect(avatar, isNot(equals(preview)));
+        expect(avatar, isNot(equals(upscaled)));
+
+        final durable = ImageCacheKey.fromUrl(
+          'https://cdn.example.com/photo.png',
+          headers: const {'Authorization': 't'},
+        );
+        expect(fullRes.cacheKey, durable);
+        expect(avatar.cacheKey, durable);
+        expect(preview.cacheKey, durable);
+        expect(upscaled.cacheKey, durable);
+      },
+    );
+
     testWidgets('durable resolve request stays ImageCacheKey-only (no scale)', (
       tester,
     ) async {
@@ -289,6 +339,151 @@ void main() {
       expect(request.headers, {'X-Token': '1'});
       expect(request.cacheKey, isNull);
     });
+
+    testWidgets(
+      'sized decode does not fork durable resolve identity (still ImageCacheKey-only)',
+      (tester) async {
+        resolver.bytes = oneByOnePngBytes();
+
+        await tester.pumpWidget(
+          wrap(
+            Image(
+              image: CachedNetworkBytesImageProvider.sized(
+                'https://cdn.example.com/sized.png',
+                cacheWidth: 48,
+                scale: 2,
+                headers: const {'X-Token': '1'},
+                resolver: resolver,
+              ),
+            ),
+          ),
+        );
+
+        await settle(tester, () => resolver.requests.isNotEmpty);
+        await tester.pump();
+
+        final request = resolver.requests.single;
+        expect(request.url, 'https://cdn.example.com/sized.png');
+        expect(request.headers, {'X-Token': '1'});
+        expect(request.cacheKey, isNull);
+      },
+    );
+
+    testWidgets('sized provider paints after resolve', (tester) async {
+      resolver.bytes = oneByOnePngBytes();
+
+      await tester.pumpWidget(
+        wrap(
+          Image(
+            image: CachedNetworkBytesImageProvider.sized(
+              'https://cdn.example.com/avatar.png',
+              cacheWidth: 24,
+              cacheHeight: 24,
+              resolver: resolver,
+            ),
+            width: 24,
+            height: 24,
+          ),
+        ),
+      );
+
+      await settle(tester, () => find.byType(RawImage).evaluate().isNotEmpty);
+      await tester.pump();
+
+      expect(find.byType(RawImage), findsOneWidget);
+      expect(resolver.requests, hasLength(1));
+    });
+
+    testWidgets(
+      'sized decode stores display-sized bitmap (not full-res body) in ImageCache',
+      (tester) async {
+        resolver.bytes = eightByEightPngBytes();
+
+        Future<ui.Image?> paintedImage() async {
+          await settle(tester, () {
+            final found = find.byType(RawImage);
+            if (found.evaluate().isEmpty) {
+              return false;
+            }
+            return tester.widget<RawImage>(found).image != null;
+          });
+          await tester.pump();
+          return tester.widget<RawImage>(find.byType(RawImage)).image;
+        }
+
+        await tester.pumpWidget(
+          wrap(
+            Image(
+              image: CachedNetworkBytesImageProvider.sized(
+                'https://cdn.example.com/downscale.png',
+                cacheWidth: 2,
+                cacheHeight: 2,
+                resolver: resolver,
+              ),
+              width: 2,
+              height: 2,
+            ),
+          ),
+        );
+
+        final sized = await paintedImage();
+        expect(sized, isNotNull);
+        expect(sized!.width, 2);
+        expect(sized.height, 2);
+
+        PaintingBinding.instance.imageCache.clear();
+        PaintingBinding.instance.imageCache.clearLiveImages();
+        resolver.requests.clear();
+
+        await tester.pumpWidget(
+          wrap(
+            Image(
+              image: CachedNetworkBytesImageProvider(
+                'https://cdn.example.com/downscale.png',
+                resolver: resolver,
+              ),
+              width: 8,
+              height: 8,
+            ),
+          ),
+        );
+
+        final full = await paintedImage();
+        expect(full, isNotNull);
+        expect(full!.width, 8);
+        expect(full.height, 8);
+      },
+    );
+
+    testWidgets(
+      'ResizeImage wrapping an unsized provider remains a valid composition path',
+      (tester) async {
+        resolver.bytes = oneByOnePngBytes();
+
+        await tester.pumpWidget(
+          wrap(
+            Image(
+              image: ResizeImage(
+                CachedNetworkBytesImageProvider(
+                  'https://cdn.example.com/resize.png',
+                  resolver: resolver,
+                ),
+                width: 16,
+                height: 16,
+              ),
+              width: 16,
+              height: 16,
+            ),
+          ),
+        );
+
+        await settle(tester, () => find.byType(RawImage).evaluate().isNotEmpty);
+        await tester.pump();
+
+        expect(find.byType(RawImage), findsOneWidget);
+        expect(resolver.requests, hasLength(1));
+      },
+    );
   });
 }
 
@@ -297,6 +492,15 @@ Uint8List oneByOnePngBytes() {
   return Uint8List.fromList(
     base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    ),
+  );
+}
+
+/// Opaque 8×8 RGB PNG — large enough to prove display-sized decode.
+Uint8List eightByEightPngBytes() {
+  return Uint8List.fromList(
+    base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC',
     ),
   );
 }
