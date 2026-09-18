@@ -24,16 +24,19 @@ one mega-widget that owns both SVG and Flutter decode lifecycles
 codecs the engine accepts — PNG, JPEG, WebP, multi-frame GIF, and siblings).
 Flutter [ImageCache] identity is [ImageCacheKey] plus scale and optional
 decode size; durable store identity stays [ImageCacheKey] alone. Optional
-injected resolver for tests. Does not mirror bodies into [PageStorage].
+injected resolver for tests. Optional [errorListener] for soft resolve /
+empty-body / decode failures when the host has no [Image.errorBuilder].
+Does not mirror bodies into [PageStorage].
 _Avoid_: opening files/sockets; forking the durable key by decode size;
 PageStorage-of-bytes on this path; inventing a sealed load state beside
-[ImageStream]
+[ImageStream]; treating [errorListener] as a product logger
 
 **CachedNetworkBytesImage**:
 Thin [Image] convenience over [CachedNetworkBytesImageProvider]. Call-site
 surface near [Image.network] (builders, gapless playback, semantics, fit,
-sized decode). Soft failures via [Image.errorBuilder] and optional [onError];
-no sealed load hierarchy and no product logger.
+sized decode). Soft failures via [Image.errorBuilder] and optional [onError]
+(forwards to the provider [errorListener]). No sealed load hierarchy and no
+product logger.
 _Avoid_: chat/avatar chrome, clip shapes, or design tokens in this type;
 SVG-style sealed [loading]/[populated]/[failure] state for raster
 

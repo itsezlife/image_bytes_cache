@@ -114,6 +114,61 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets(
+      'errorListener reports resolve failure without unhandled FlutterError',
+      (tester) async {
+        resolver.error = Exception('resolve failed');
+        final errors = <Object>[];
+
+        final provider = CachedNetworkBytesImageProvider(
+          'https://cdn.example.com/missing.png',
+          resolver: resolver,
+          errorListener: (error, stackTrace) => errors.add(error),
+        );
+        final stream = provider.resolve(ImageConfiguration.empty);
+        final listener = ImageStreamListener((image, synchronousCall) {});
+        stream.addListener(listener);
+
+        await settle(tester, () => errors.isNotEmpty);
+        await tester.pump();
+
+        expect(errors, hasLength(1));
+        expect(errors.single, isException);
+        expect(tester.takeException(), isNull);
+
+        stream.removeListener(listener);
+        expect(stream.completer, isNotNull);
+        expect(stream.completer!.hasListeners, isFalse);
+      },
+    );
+
+    testWidgets(
+      'errorListener reports empty-body failure without unhandled FlutterError',
+      (tester) async {
+        resolver.bytes = Uint8List(0);
+        final errors = <Object>[];
+
+        final provider = CachedNetworkBytesImageProvider(
+          'https://cdn.example.com/empty.png',
+          resolver: resolver,
+          errorListener: (error, stackTrace) => errors.add(error),
+        );
+        final stream = provider.resolve(ImageConfiguration.empty);
+        final listener = ImageStreamListener((image, synchronousCall) {});
+        stream.addListener(listener);
+
+        await settle(tester, () => errors.isNotEmpty);
+        await tester.pump();
+
+        expect(errors, hasLength(1));
+        expect(errors.single, isA<StateError>());
+        expect(tester.takeException(), isNull);
+
+        stream.removeListener(listener);
+        expect(stream.completer!.hasListeners, isFalse);
+      },
+    );
+
     testWidgets('corrupt/non-image bytes surface via errorBuilder', (tester) async {
       resolver.bytes = Uint8List.fromList('not-an-image'.codeUnits);
       final errorKey = UniqueKey();
@@ -262,6 +317,23 @@ void main() {
           headers: const {'Authorization': 't'},
         ),
       );
+
+      // Callback identity must not split Flutter ImageCache keys.
+      final withListener = CachedNetworkBytesImageProvider(
+        'https://cdn.example.com/a.png',
+        headers: const {'Authorization': 't'},
+        scale: 1,
+        errorListener: (error, stackTrace) {},
+      );
+      final otherListener = CachedNetworkBytesImageProvider(
+        'https://cdn.example.com/a.png',
+        headers: const {'Authorization': 't'},
+        scale: 1,
+        errorListener: (error, stackTrace) {},
+      );
+      expect(a, equals(withListener));
+      expect(withListener, equals(otherListener));
+      expect(withListener.hashCode, otherListener.hashCode);
     });
 
     test(

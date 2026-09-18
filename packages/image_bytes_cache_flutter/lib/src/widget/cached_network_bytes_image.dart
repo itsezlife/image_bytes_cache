@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/widgets.dart';
 import 'package:image_bytes_cache/image_bytes_cache.dart';
 
@@ -7,14 +5,14 @@ import '../image_provider/cached_network_bytes_image_provider.dart';
 
 /// Thin [Image] convenience over [CachedNetworkBytesImageProvider].
 ///
-/// When [cacheWidth] and/or [cacheHeight] are set, they go onto the provider
-/// (Flutter [ImageCache] identity includes decode size). Do not also wrap this
-/// widget's image in [ResizeImage] — two decode-size layers assert.
+/// Call site near [Image.network]: builders, fit, semantics, gapless playback,
+/// and optional display-sized decode. [cacheWidth] / [cacheHeight] go onto the
+/// provider (Flutter [ImageCache] identity includes decode size). Do not also
+/// wrap this widget's image in [ResizeImage].
 ///
-/// Soft failures surface via [errorBuilder] and optional [onError]. [onError]
-/// runs once per distinct failure object for the current image identity; it is
-/// not a product logger. Resolve, empty-body, and decode failures all take
-/// this path.
+/// Soft failures use [errorBuilder] for paint and optional [onError] for a
+/// once-per-load callback (forwarded to
+/// [CachedNetworkBytesImageProvider.errorListener]).
 class CachedNetworkBytesImage extends StatefulWidget {
   /// Creates a thin raster image for [url].
   ///
@@ -92,19 +90,19 @@ class CachedNetworkBytesImage extends StatefulWidget {
   /// See [Image.frameBuilder].
   final ImageFrameBuilder? frameBuilder;
 
-  /// See [Image.loadingBuilder]. Receives honest network-miss [ImageChunkEvent]s;
-  /// durable cache hits do not invent mid-download percents.
+  /// See [Image.loadingBuilder]. Network-miss [ImageChunkEvent]s are real
+  /// fetcher bytes; durable cache hits do not invent mid-download progress.
   final ImageLoadingBuilder? loadingBuilder;
 
-  /// Built when the [ImageStream] reports a failure. Defaults to an empty box
-  /// when [onError] is set and this is null; when both are null, Flutter's
-  /// default error reporting applies.
+  /// Built when the [ImageStream] reports a failure.
+  ///
+  /// When [onError] is set and this is null, paints an empty box. When both
+  /// are null, Flutter's default error reporting applies.
   final ImageErrorWidgetBuilder? errorBuilder;
 
-  /// Invoked once per distinct failure for the current image identity.
+  /// Called once per failed load. Forwards to the provider [errorListener].
   ///
-  /// When null, failures stay silent here aside from [errorBuilder] / Flutter
-  /// debug reporting. Not a product logger.
+  /// Uses [StackTrace.empty] when the stream supplies a null stack.
   final void Function(Object error, StackTrace stackTrace)? onError;
 
   /// Accessibility label when semantics are enabled.
@@ -157,16 +155,10 @@ class CachedNetworkBytesImage extends StatefulWidget {
 }
 
 class _CachedNetworkBytesImageState extends State<CachedNetworkBytesImage> {
-  Object? _reportedError;
-
-  @override
-  void didUpdateWidget(covariant CachedNetworkBytesImage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final oldProvider = _providerFor(oldWidget);
-    final newProvider = _providerFor(widget);
-    if (oldProvider != newProvider) {
-      _reportedError = null;
-    }
+  // Stable tear-off: ImageCache may reuse an equal provider, so the ephemeral
+  // listener registered on first load must read the current widget.onError.
+  void _forwardOnError(Object error, StackTrace? stackTrace) {
+    widget.onError?.call(error, stackTrace ?? StackTrace.empty);
   }
 
   CachedNetworkBytesImageProvider _providerFor(CachedNetworkBytesImage w) {
@@ -178,29 +170,16 @@ class _CachedNetworkBytesImageState extends State<CachedNetworkBytesImage> {
       cacheHeight: w.cacheHeight,
       allowUpscaling: w.allowUpscaling,
       resolver: w.resolver,
+      errorListener: w.onError == null ? null : _forwardOnError,
     );
   }
 
-  void _reportError(Object error, StackTrace? stackTrace) {
-    final onError = widget.onError;
-    if (onError == null) return;
-    if (identical(_reportedError, error)) return;
-    _reportedError = error;
-    onError(error, stackTrace ?? StackTrace.empty);
-  }
-
-  /// Bridges [Image.errorBuilder] so optional [CachedNetworkBytesImage.onError]
-  /// fires once per distinct failure without running host side-effects mid-build.
-  ImageErrorWidgetBuilder? get _bridgedErrorBuilder {
+  /// [Image.errorBuilder] for paint only; [onError] is owned by the provider.
+  ImageErrorWidgetBuilder? get _paintErrorBuilder {
     if (widget.errorBuilder == null && widget.onError == null) {
       return null;
     }
     return (context, error, stackTrace) {
-      // Image invokes errorBuilder during build while holding the failure;
-      // defer onError so hosts never mutate mid-build.
-      if (widget.onError != null && !identical(_reportedError, error)) {
-        scheduleMicrotask(() => _reportError(error, stackTrace));
-      }
       return widget.errorBuilder?.call(context, error, stackTrace) ?? const SizedBox.shrink();
     };
   }
@@ -211,7 +190,7 @@ class _CachedNetworkBytesImageState extends State<CachedNetworkBytesImage> {
       image: _providerFor(widget),
       frameBuilder: widget.frameBuilder,
       loadingBuilder: widget.loadingBuilder,
-      errorBuilder: _bridgedErrorBuilder,
+      errorBuilder: _paintErrorBuilder,
       semanticLabel: widget.semanticLabel,
       excludeFromSemantics: widget.excludeFromSemantics,
       width: widget.width,

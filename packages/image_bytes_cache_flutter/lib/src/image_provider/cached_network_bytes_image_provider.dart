@@ -13,27 +13,24 @@ import 'package:image_bytes_cache/image_bytes_cache.dart';
 /// mirror bodies into [PageStorage]; remounts rely on the durable ladder plus
 /// Flutter's [ImageCache].
 ///
-/// Network-miss progress from [ImageBytesRequest.onBytesProgress] is forwarded
-/// as [ImageChunkEvent]s for [Image.loadingBuilder]. A durable cache hit does
-/// not invent mid-download percents: the sink stays quiet, and hosts must not
-/// treat that silence as 0%.
+/// Network-miss progress from [ImageBytesRequest.onBytesProgress] becomes
+/// [ImageChunkEvent]s for [Image.loadingBuilder]. A durable cache hit stays
+/// quiet; that silence is not 0% progress.
 ///
 /// Flutter [ImageCache] equality is [cacheKey], [scale], and optional decode
 /// size ([cacheWidth] / [cacheHeight] / [allowUpscaling]). Durable store and
-/// HTTP coalesce identity stay [ImageCacheKey] alone, so neither [scale] nor
-/// decode size enter [ImageBytesRequest]. [resolver] is wiring only and is not
-/// part of equality; two providers that share the Flutter identity collide in
-/// [ImageCache] even if their injected resolvers differ.
+/// HTTP coalesce identity stay [ImageCacheKey] alone. [resolver] and
+/// [errorListener] are wiring only and do not participate in equality.
 ///
-/// Prefer first-class [cacheWidth] / [cacheHeight] (or [.sized]) when the host
-/// needs display-sized bitmaps under [DecorationImage], [CircleAvatar], or any
-/// non-[Image] slot. Wrapping an **unsized** provider in [ResizeImage] remains
-/// a supported composition path; do not stack [ResizeImage] on a provider that
-/// already applies decode size — Flutter asserts when two layers both supply
-/// [ui.TargetImageSize].
+/// Prefer [cacheWidth] / [cacheHeight] (or [.sized]) when the host needs
+/// display-sized bitmaps under [DecorationImage], [CircleAvatar], or any
+/// non-[Image] slot. Wrapping an **unsized** provider in [ResizeImage] is
+/// fine; stacking [ResizeImage] on a provider that already sets decode size
+/// asserts.
 ///
-/// Resolve, empty-body, and decode failures surface on the [ImageStream]
-/// ([Image.errorBuilder]). This type does not log soft failures.
+/// Resolve, empty-body, and decode failures surface on the [ImageStream].
+/// Optional [errorListener] reports those soft failures when the host has no
+/// [Image.errorBuilder] (for example [DecorationImage] alone).
 @immutable
 class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesImageProvider> {
   /// Creates a provider for [url].
@@ -53,6 +50,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
     this.cacheHeight,
     this.allowUpscaling = false,
     this.resolver,
+    this.errorListener,
   }) : assert(
          cacheWidth == null || cacheWidth > 0,
          'cacheWidth must be null or > 0.',
@@ -75,6 +73,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
     this.cacheHeight,
     this.allowUpscaling = false,
     this.resolver,
+    this.errorListener,
   }) : assert(
          cacheWidth != null || cacheHeight != null,
          'CachedNetworkBytesImageProvider.sized requires cacheWidth and/or '
@@ -127,6 +126,15 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
   /// Flutter [ImageCache] entries for the same Flutter identity.
   final IImageBytesResolver? resolver;
 
+  /// Called once when resolve, empty-body, or decode fails.
+  ///
+  /// Signature matches [ImageErrorListener]. Omitted from [operator ==] /
+  /// [hashCode] so a new closure on rebuild does not split Flutter
+  /// [ImageCache]. Useful under [DecorationImage] and other slots without
+  /// [Image.errorBuilder]; stream [onError] / [DecorationImage.onError] still
+  /// work on their own.
+  final ImageErrorListener? errorListener;
+
   /// Durable identity for [url] + [headers] ([ImageCacheKey.fromUrl]).
   ///
   /// Flutter [ImageCache] keys this provider as [cacheKey], [scale], and
@@ -153,7 +161,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
     // close it on every completion path (success or failure).
     final chunkEvents = StreamController<ImageChunkEvent>();
 
-    return MultiFrameImageStreamCompleter(
+    final completer = MultiFrameImageStreamCompleter(
       codec: _loadAsync(key, chunkEvents, decode: decode),
       chunkEvents: chunkEvents.stream,
       scale: key.scale,
@@ -163,6 +171,15 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
         DiagnosticsProperty<CachedNetworkBytesImageProvider>('Image key', key),
       ],
     );
+
+    // Ephemeral: participates in reportError handling without keep-alive.
+    // Do not also invoke errorListener from _loadAsync's catch (double-fire).
+    final listener = errorListener;
+    if (listener != null) {
+      completer.addEphemeralErrorListener(listener);
+    }
+
+    return completer;
   }
 
   Future<ui.Codec> _loadAsync(

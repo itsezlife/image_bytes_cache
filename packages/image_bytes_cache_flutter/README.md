@@ -5,62 +5,30 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Flutter paint adapters for
-[`image_bytes_cache`](../image_bytes_cache/). Adapters resolve remote image
-**bytes** through the core ladder, then paint. Ships
-`CachedNetworkBytesImageProvider` / `CachedNetworkBytesImage` for
-Flutter-decodable rasters and `CachedNetworkSvgImage` for remote SVG. Durable
-storage stays in the core package.
+[`image_bytes_cache`](../image_bytes_cache/). Resolve remote image **bytes**
+through the core ladder, then paint. This package ships raster
+`CachedNetworkBytesImageProvider` / `CachedNetworkBytesImage` and SVG
+`CachedNetworkSvgImage`. Durable storage stays in core.
 
-This package does not open files, sockets, or durable stores. Hosts still call
-`ImageBytesCache.open` / `configure` on the core package before paint.
+Widgets here do not open files, sockets, or durable stores. Call
+`ImageBytesCache.open` / `configure` on the core package once before paint.
 
 ## Features
 
-- **Thin paint layer.** Depends on `IImageBytesResolver` / `ImageCacheKey` only.
-  No second resolve tree, no blob IO in widgets.
-- **CachedNetworkBytesImageProvider.** Resolves via the shared ladder, decodes
-  with Flutter’s image pipeline, and maps honest download progress to
-  `ImageChunkEvent`. Optional `cacheWidth` / `cacheHeight` (or `.sized`)
-  participate in Flutter `ImageCache` identity only. Compose with `Image` /
-  `DecorationImage` like `NetworkImage`; `ResizeImage` wrapping stays valid on
-  unsized providers.
-- **CachedNetworkBytesImage.** Thin `Image` convenience over the provider —
-  near-`Image.network` knobs (builders, gapless playback, fit, semantics,
-  sized decode) plus optional `onError`. No sealed raster load state; no
-  product logger. Soft failures via `errorBuilder` / `onError`.
-- **CachedNetworkSvgImage.** Loads via the shared resolver and draws with
-  `SvgPicture.memory`.
-- **Scroll-friendly identity.** Optional short-lived `PageStorage` copy under
-  the same `ImageCacheKey` as the durable store, size-bounded
-  (`pageStorageMaxBytes`, default 64 KiB) and disableable via
-  `persistInPageStorage: false` (**SVG only**).
-- **Sealed load states (SVG).** `CachedNetworkSvgImageState` is
-  `loading` / `populated` / `failure`. Use `map` so each variant owns its tree.
-  Raster does not use this hierarchy — it rides `ImageStream`.
-- **Soft failures stay local.** Resolve **and** SVG parse/paint failures go
-  through `errorBuilder` / `onError` — never an endless `placeholderBuilder`.
-  Raster uses the same soft-failure surface on `Image`. No product logger
-  inside paint adapters.
-- **Identity-aligned reloads.** SVG `didUpdateWidget` gates on `ImageCacheKey`
-  (canonical headers), not raw map equality. Keep-previous picture while a new
-  URL resolves.
-- **Testable.** Inject an `IImageBytesResolver`; leave durable open policy in
-  the host or core test doubles.
+- **Thin paint layer.** Depends on `IImageBytesResolver` / `ImageCacheKey`
+  only. No second resolve tree in widgets.
+- **Raster.** Provider for any `ImageProvider` slot (`Image`,
+  `DecorationImage`, …) plus a thin `Image`-shaped widget. Optional display-
+  sized decode for Flutter `ImageCache`; durable keys stay `ImageCacheKey`.
+- **SVG.** `CachedNetworkSvgImage` with sealed load state, optional bounded
+  `PageStorage` restore, and soft failures via `errorBuilder` / `onError`.
+- **Testable.** Inject an `IImageBytesResolver` in tests.
 
 ## Installation
 
 ```yaml
 dependencies:
-  image_bytes_cache:
-    git:
-      url: https://github.com/itsezlife/image_bytes_cache.git
-      path: packages/image_bytes_cache
-      ref: main
-  image_bytes_cache_flutter:
-    git:
-      url: https://github.com/itsezlife/image_bytes_cache.git
-      path: packages/image_bytes_cache_flutter
-      ref: main
+  image_bytes_cache_flutter: latest
 ```
 
 Then `flutter pub get`.
@@ -69,8 +37,7 @@ Then `flutter pub get`.
 
 ### 1. Bootstrap the core cache
 
-Do this once at app start (VM needs a reclaimable cache directory; web ignores
-it):
+Once at app start (VM needs a reclaimable cache directory; web ignores it):
 
 ```dart
 import 'package:image_bytes_cache/image_bytes_cache.dart';
@@ -88,8 +55,7 @@ diagnostics, and platform backends.
 
 ### 2. Paint a raster
 
-**Provider-first** — anywhere an `ImageProvider` is accepted (`Image`,
-`DecorationImage`, `CircleAvatar`, …):
+Anywhere an `ImageProvider` is accepted:
 
 ```dart
 import 'package:flutter/material.dart';
@@ -111,14 +77,7 @@ Image(
 );
 ```
 
-Pass `cacheWidth` / `cacheHeight` (or use
-`CachedNetworkBytesImageProvider.sized`) so Flutter’s `ImageCache` holds
-display-sized bitmaps — a 32px avatar and a large preview of the same URL do
-not thrash each other. Decode size never changes durable `ImageCacheKey` /
-HTTP coalesce. Wrapping an **unsized** provider in `ResizeImage` remains
-valid; do not stack `ResizeImage` on a provider that already sets decode size.
-Network-miss progress is real fetcher bytes; cache hits do not invent
-mid-download percents. Raster does not mirror bodies into `PageStorage`.
+For a display-sized bitmap (avatar vs preview of the same URL):
 
 ```dart
 Image(
@@ -132,8 +91,7 @@ Image(
 );
 ```
 
-**Thin widget** — near-`Image.network` call site when you want builders /
-`onError` without composing `Image` yourself:
+Or the thin widget when you want near-`Image.network` knobs in one place:
 
 ```dart
 CachedNetworkBytesImage(
@@ -142,25 +100,17 @@ CachedNetworkBytesImage(
   height: 64,
   cacheWidth: 64,
   cacheHeight: 64,
-  loadingBuilder: (context, child, progress) {
-    if (progress == null) return child;
-    final total = progress.expectedTotalBytes;
-    return CircularProgressIndicator(
-      value: total == null ? null : progress.cumulativeBytesLoaded / total,
-    );
-  },
   errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image),
   onError: (error, stackTrace) {
-    // Optional: report once per distinct failure for this image identity.
+    // Optional once-per-load callback.
   },
 );
 ```
 
-Sized decode knobs on the widget go onto the provider (not a second
-`ResizeImage` layer). Prefer the provider directly under `DecorationImage` or
-any non-`Image` slot.
+Under `DecorationImage` (no `Image.errorBuilder`), pass `errorListener` on the
+provider if you want that same soft-failure callback.
 
-### 3. Paint an SVG with `CachedNetworkSvgImage`
+### 3. Paint a SVG
 
 ```dart
 import 'package:flutter/material.dart';
@@ -176,86 +126,11 @@ CachedNetworkSvgImage(
     child: CircularProgressIndicator(strokeWidth: 2),
   ),
   errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image),
-  onError: (error, stackTrace) {
-    // Optional: report once per failure transition.
-  },
 );
 ```
 
-Defaults: `ImageBytesResolver.shared()`, `BoxFit.contain`, empty box on failure
-when `errorBuilder` is omitted.
-
-## CachedNetworkBytesImage
-
-| Argument | Notes |
-| --- | --- |
-| `url` | Absolute or `Uri.base`-relative raster URL |
-| `headers` | Sent on the network hop; folded into `ImageCacheKey` |
-| `resolver` | Override for tests; default `ImageBytesResolver.shared()` |
-| `scale` | Forwarded to the provider; participates in Flutter `ImageCache` identity |
-| `cacheWidth` / `cacheHeight` / `allowUpscaling` | Display-sized decode on the provider (not `ResizeImage`) |
-| `width` / `height` / `fit` / `alignment` / … | Passed through to `Image` |
-| `frameBuilder` / `loadingBuilder` / `errorBuilder` | Standard `Image` builders |
-| `onError` | Called once per distinct failure for the current image identity |
-| `gaplessPlayback` / `semanticLabel` / `filterQuality` / … | Same meaning as `Image.network` |
-
-## CachedNetworkSvgImage
-
-| Argument | Notes |
-| --- | --- |
-| `url` | Absolute or `Uri.base`-relative SVG URL |
-| `headers` | Sent on the network hop; folded into `ImageCacheKey` |
-| `resolver` | Override for tests; default `ImageBytesResolver.shared()` |
-| `width` / `height` / `fit` / `alignment` | Passed through to `SvgPicture` |
-| `theme` / `colorFilter` | flutter_svg styling |
-| `placeholderBuilder` | While `CachedNetworkSvgImageState.loading` (not reused during SVG decode) |
-| `errorBuilder` | On `failure` (resolve or paint); default is an empty box |
-| `onError` | Called once per failure transition |
-| `persistInPageStorage` | Default `true`; set `false` to skip widget-local body cache |
-| `pageStorageMaxBytes` | Max bytes written to PageStorage (default 64 KiB) |
-
-```dart
-CachedNetworkSvgImage(
-  url,
-  headers: const {'Authorization': 'Bearer …'},
-  colorFilter: ColorFilter.mode(scheme.onSurface, BlendMode.srcIn),
-  semanticsLabel: 'Company logo',
-);
-```
-
-## Load state
-
-```dart
-state.map(
-  loading: (_) => const PlaceholderPulse(),
-  populated: (s) => SvgPicture.memory(s.imageBytes),
-  failure: (s) => ErrorGlyph(error: s.error),
-);
-```
-
-Prefer `map` over boolean loading/error flags. The widget already does this
-internally for placeholder / picture / error chrome.
-
-## Architecture
-
-```
-CachedNetworkBytesImage ──► CachedNetworkBytesImageProvider
-CachedNetworkSvgImage
-        │
-        ▼
-IImageBytesResolver  (image_bytes_cache)
-        │
-        ├─ IImageBytesCache   durable / memory / no-op
-        └─ HttpBytesFetcher   pool + coalesce
-```
-
-| Package | Owns |
-| --- | --- |
-| `image_bytes_cache` | Open/configure, retention, blob stores, resolve ladder, store microbenches |
-| `image_bytes_cache_flutter` (this) | Paint providers/widgets, widget tests, Flutter-side profile benches |
-
-Do not keep a second resolve/paint implementation in a design-system
-package. Re-export from here if call sites need a stable host import.
+Defaults: shared resolver, `BoxFit.contain`, empty box when `errorBuilder` is
+omitted.
 
 ## Platform support
 
@@ -274,15 +149,12 @@ flutter analyze
 Core store / ladder benches and Chrome open smoke stay in
 [`../image_bytes_cache/`](../image_bytes_cache/).
 
-Contributor orientation:
-
-- [`AGENTS.md`](AGENTS.md)
-- [`CONTEXT.md`](CONTEXT.md)
-- Core: [`../image_bytes_cache/AGENTS.md`](../image_bytes_cache/AGENTS.md)
+Contributor orientation: [`AGENTS.md`](AGENTS.md), [`CONTEXT.md`](CONTEXT.md),
+and core [`../image_bytes_cache/AGENTS.md`](../image_bytes_cache/AGENTS.md).
 
 ## Changelog
 
-Refer to the [Changelog](CHANGELOG.md) to get all release notes.
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Maintainers
 

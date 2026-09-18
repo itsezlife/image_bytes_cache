@@ -37,8 +37,9 @@ files, sockets, or durable stores from widgets.
    request types). Do not reimplement ladder, coalesce, or blob IO here.
 2. **Soft paint failures stay widget-local** (`onError` / `errorBuilder` for
    SVG resolve **and** SVG decode/paint; raster uses `Image.errorBuilder` /
-   optional `onError` — never endless placeholder alone). No product logger
-   inside paint adapters.
+   optional provider `errorListener` / thin-widget `onError` — never endless
+   placeholder alone). No product logger inside paint adapters. Raster
+   `errorListener` uses `addEphemeralErrorListener` (not `addListener`).
 3. **PageStorage identity** aligns with `ImageCacheKey` when a short-lived
    copy is kept for **SVG** scroll restore; keep it bounded / opt-out
    (`pageStorageMaxBytes` / `persistInPageStorage`), never a second durable

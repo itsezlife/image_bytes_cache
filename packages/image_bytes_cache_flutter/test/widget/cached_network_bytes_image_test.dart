@@ -95,6 +95,37 @@ void main() {
     });
 
     testWidgets(
+      'onError fires once per failure via provider errorListener (no double-fire)',
+      (tester) async {
+        resolver.error = Exception('resolve failed');
+        final errors = <Object>[];
+
+        await tester.pumpWidget(
+          wrap(
+            CachedNetworkBytesImage(
+              'https://cdn.example.com/missing.png',
+              resolver: resolver,
+              onError: (error, stackTrace) => errors.add(error),
+              // errorBuilder paints UI only; must not also side-report onError.
+              errorBuilder: (_, __, ___) => const Text('load-failed'),
+            ),
+          ),
+        );
+
+        await settle(
+          tester,
+          () => find.text('load-failed').evaluate().isNotEmpty && errors.isNotEmpty,
+        );
+        // Extra pumps: a double-fire bridge would append a second error here.
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+
+        expect(errors, hasLength(1));
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
       'sized decode paints display-sized bitmap through the widget path',
       (tester) async {
         resolver.bytes = eightByEightPngBytes();

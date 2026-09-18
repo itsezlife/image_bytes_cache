@@ -1,20 +1,14 @@
 ## Unreleased
 
-- **ADDED**: `CachedNetworkBytesImageProvider` — ImageProvider over
-  `IImageBytesResolver` for Flutter-decodable rasters (PNG/JPEG/WebP/GIF and
-  siblings). Maps honest ladder `onBytesProgress` to `ImageChunkEvent`; Flutter
-  `ImageCache` identity is `ImageCacheKey` + scale + optional decode size
-  (`cacheWidth` / `cacheHeight` / `allowUpscaling`, also via `.sized`); durable
-  key stays `ImageCacheKey` only. External `ResizeImage` wrapping remains valid
-  on unsized providers. No PageStorage body mirror. Injected resolver for
-  tests.
-- **ADDED**: `CachedNetworkBytesImage` — thin `Image` convenience over the
-  provider with near-`Image.network` knobs plus optional `onError`. Sized
-  decode knobs wire into the provider (not a second `ResizeImage` layer).
-  `loadingBuilder` sees the same honest network-miss `ImageChunkEvent`s as
-  composing the provider directly; durable hits still invent no mid-download
-  percents. No sealed raster load state and no product logger. Soft failures
-  via `errorBuilder` / `onError`. Hosts still bootstrap via core
+- **ADDED**: Raster paint adapters —
+  `CachedNetworkBytesImageProvider` and thin `CachedNetworkBytesImage` over
+  `IImageBytesResolver`. Display-sized decode (`cacheWidth` / `cacheHeight` /
+  `.sized`) splits Flutter `ImageCache` entries without changing durable
+  `ImageCacheKey`. Optional `errorListener` on the provider (widget `onError`
+  forwards into it) for soft resolve / empty-body / decode failures when the
+  host has no `Image.errorBuilder`. Network-miss progress maps to
+  `ImageChunkEvent`; cache hits invent no mid-download percents. No PageStorage
+  body mirror and no sealed raster load state. Hosts still
   `ImageBytesCache.open` / `configure` before paint.
 
 ## 0.0.2
