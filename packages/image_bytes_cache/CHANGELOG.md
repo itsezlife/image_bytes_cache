@@ -1,4 +1,4 @@
-## Unreleased
+## 0.1.0
 
 - **ADDED**: Optional honest bytes-progress reporting on the resolve ladder.
   `ImageBytesRequest.onBytesProgress` / `HttpBytesFetcher.getBytes(onBytesProgress:)`

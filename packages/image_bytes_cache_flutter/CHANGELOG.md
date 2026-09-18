@@ -1,4 +1,4 @@
-## Unreleased
+## 0.1.0
 
 - **ADDED**: Raster paint adapters —
   `CachedNetworkBytesImageProvider` and thin `CachedNetworkBytesImage` over
