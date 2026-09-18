@@ -7,9 +7,9 @@
 Flutter paint adapters for
 [`image_bytes_cache`](../image_bytes_cache/). Adapters resolve remote image
 **bytes** through the core ladder, then paint. Ships
-`CachedNetworkBytesImageProvider` for Flutter-decodable rasters and
-`CachedNetworkSvgImage` for remote SVG. Durable storage stays in the core
-package.
+`CachedNetworkBytesImageProvider` / `CachedNetworkBytesImage` for
+Flutter-decodable rasters and `CachedNetworkSvgImage` for remote SVG. Durable
+storage stays in the core package.
 
 This package does not open files, sockets, or durable stores. Hosts still call
 `ImageBytesCache.open` / `configure` on the core package before paint.
@@ -24,18 +24,24 @@ This package does not open files, sockets, or durable stores. Hosts still call
   participate in Flutter `ImageCache` identity only. Compose with `Image` /
   `DecorationImage` like `NetworkImage`; `ResizeImage` wrapping stays valid on
   unsized providers.
+- **CachedNetworkBytesImage.** Thin `Image` convenience over the provider —
+  near-`Image.network` knobs (builders, gapless playback, fit, semantics,
+  sized decode) plus optional `onError`. No sealed raster load state; no
+  product logger. Soft failures via `errorBuilder` / `onError`.
 - **CachedNetworkSvgImage.** Loads via the shared resolver and draws with
   `SvgPicture.memory`.
 - **Scroll-friendly identity.** Optional short-lived `PageStorage` copy under
   the same `ImageCacheKey` as the durable store, size-bounded
   (`pageStorageMaxBytes`, default 64 KiB) and disableable via
-  `persistInPageStorage: false`.
-- **Sealed load states.** `CachedNetworkSvgImageState` is
+  `persistInPageStorage: false` (**SVG only**).
+- **Sealed load states (SVG).** `CachedNetworkSvgImageState` is
   `loading` / `populated` / `failure`. Use `map` so each variant owns its tree.
+  Raster does not use this hierarchy — it rides `ImageStream`.
 - **Soft failures stay local.** Resolve **and** SVG parse/paint failures go
   through `errorBuilder` / `onError` — never an endless `placeholderBuilder`.
-  No product logger inside the widget.
-- **Identity-aligned reloads.** `didUpdateWidget` gates on `ImageCacheKey`
+  Raster uses the same soft-failure surface on `Image`. No product logger
+  inside paint adapters.
+- **Identity-aligned reloads.** SVG `didUpdateWidget` gates on `ImageCacheKey`
   (canonical headers), not raw map equality. Keep-previous picture while a new
   URL resolves.
 - **Testable.** Inject an `IImageBytesResolver`; leave durable open policy in
@@ -80,7 +86,10 @@ await ImageBytesCache.configure(
 See the [core README](../image_bytes_cache/README.md) for retention,
 diagnostics, and platform backends.
 
-### 2. Paint a raster with `CachedNetworkBytesImageProvider`
+### 2. Paint a raster
+
+**Provider-first** — anywhere an `ImageProvider` is accepted (`Image`,
+`DecorationImage`, `CircleAvatar`, …):
 
 ```dart
 import 'package:flutter/material.dart';
@@ -102,8 +111,7 @@ Image(
 );
 ```
 
-Works anywhere an `ImageProvider` is accepted (`DecorationImage`,
-`CircleAvatar`, …). Pass `cacheWidth` / `cacheHeight` (or use
+Pass `cacheWidth` / `cacheHeight` (or use
 `CachedNetworkBytesImageProvider.sized`) so Flutter’s `ImageCache` holds
 display-sized bitmaps — a 32px avatar and a large preview of the same URL do
 not thrash each other. Decode size never changes durable `ImageCacheKey` /
@@ -123,6 +131,34 @@ Image(
   height: 64,
 );
 ```
+
+**Thin widget** — near-`Image.network` call site when you want builders /
+`onError` without composing `Image` yourself:
+
+```dart
+CachedNetworkBytesImage(
+  'https://cdn.example.com/photo.jpg',
+  width: 64,
+  height: 64,
+  cacheWidth: 64,
+  cacheHeight: 64,
+  loadingBuilder: (context, child, progress) {
+    if (progress == null) return child;
+    final total = progress.expectedTotalBytes;
+    return CircularProgressIndicator(
+      value: total == null ? null : progress.cumulativeBytesLoaded / total,
+    );
+  },
+  errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image),
+  onError: (error, stackTrace) {
+    // Optional: report once per distinct failure for this image identity.
+  },
+);
+```
+
+Sized decode knobs on the widget go onto the provider (not a second
+`ResizeImage` layer). Prefer the provider directly under `DecorationImage` or
+any non-`Image` slot.
 
 ### 3. Paint an SVG with `CachedNetworkSvgImage`
 
@@ -148,6 +184,20 @@ CachedNetworkSvgImage(
 
 Defaults: `ImageBytesResolver.shared()`, `BoxFit.contain`, empty box on failure
 when `errorBuilder` is omitted.
+
+## CachedNetworkBytesImage
+
+| Argument | Notes |
+| --- | --- |
+| `url` | Absolute or `Uri.base`-relative raster URL |
+| `headers` | Sent on the network hop; folded into `ImageCacheKey` |
+| `resolver` | Override for tests; default `ImageBytesResolver.shared()` |
+| `scale` | Forwarded to the provider; participates in Flutter `ImageCache` identity |
+| `cacheWidth` / `cacheHeight` / `allowUpscaling` | Display-sized decode on the provider (not `ResizeImage`) |
+| `width` / `height` / `fit` / `alignment` / … | Passed through to `Image` |
+| `frameBuilder` / `loadingBuilder` / `errorBuilder` | Standard `Image` builders |
+| `onError` | Called once per distinct failure for the current image identity |
+| `gaplessPlayback` / `semanticLabel` / `filterQuality` / … | Same meaning as `Image.network` |
 
 ## CachedNetworkSvgImage
 
@@ -189,6 +239,7 @@ internally for placeholder / picture / error chrome.
 ## Architecture
 
 ```
+CachedNetworkBytesImage ──► CachedNetworkBytesImageProvider
 CachedNetworkSvgImage
         │
         ▼
@@ -201,7 +252,7 @@ IImageBytesResolver  (image_bytes_cache)
 | Package | Owns |
 | --- | --- |
 | `image_bytes_cache` | Open/configure, retention, blob stores, resolve ladder, store microbenches |
-| `image_bytes_cache_flutter` (this) | Paint widgets, widget tests, Flutter-side profile benches |
+| `image_bytes_cache_flutter` (this) | Paint providers/widgets, widget tests, Flutter-side profile benches |
 
 Do not keep a second resolve/paint implementation in a design-system
 package. Re-export from here if call sites need a stable host import.

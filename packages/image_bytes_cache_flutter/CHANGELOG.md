@@ -7,8 +7,15 @@
   (`cacheWidth` / `cacheHeight` / `allowUpscaling`, also via `.sized`); durable
   key stays `ImageCacheKey` only. External `ResizeImage` wrapping remains valid
   on unsized providers. No PageStorage body mirror. Injected resolver for
-  tests. Thin `CachedNetworkBytesImage` still lands later in this foundation
-  train.
+  tests.
+- **ADDED**: `CachedNetworkBytesImage` — thin `Image` convenience over the
+  provider with near-`Image.network` knobs plus optional `onError`. Sized
+  decode knobs wire into the provider (not a second `ResizeImage` layer).
+  `loadingBuilder` sees the same honest network-miss `ImageChunkEvent`s as
+  composing the provider directly; durable hits still invent no mid-download
+  percents. No sealed raster load state and no product logger. Soft failures
+  via `errorBuilder` / `onError`. Hosts still bootstrap via core
+  `ImageBytesCache.open` / `configure` before paint.
 
 ## 0.0.2
 
