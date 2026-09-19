@@ -10,24 +10,24 @@ import 'package:test/test.dart';
 /// (no logout / refresh). Mirrors api_client's bearer middleware harness for
 /// the image-GET surface.
 void main() {
-  HttpBytesClient fetcherWith(
-    MockClient client, {
+  HttpBytesClient clientWith(
+    MockClient httpClient, {
     required Future<String?> Function() getToken,
   }) {
-    final fetcher = HttpBytesClient(
-      client: client,
+    final client = HttpBytesClient(
+      client: httpClient,
       middlewares: <HttpBytesMiddleware>[
         HttpBytesBearerMiddleware(getToken: getToken),
       ],
     );
-    addTearDown(fetcher.close);
-    return fetcher;
+    addTearDown(client.close);
+    return client;
   }
 
   group('HttpBytesBearerMiddleware', () {
     test('attaches "Authorization: Bearer <token>" from getToken on success', () async {
       Map<String, String>? seen;
-      final fetcher = fetcherWith(
+      final client = clientWith(
         MockClient((request) async {
           seen = Map<String, String>.of(request.headers);
           return http.Response.bytes(Uint8List.fromList([1]), 200);
@@ -35,14 +35,14 @@ void main() {
         getToken: () async => 'tok-123',
       );
 
-      await fetcher.getBytes(Uri.parse('https://cdn.test/data'));
+      await client.getBytes(Uri.parse('https://cdn.test/data'));
 
       expect(seen?['authorization'], equals('Bearer tok-123'));
     });
 
     test('fails fast when the token is null — no request is sent', () async {
       var requestSent = false;
-      final fetcher = fetcherWith(
+      final client = clientWith(
         MockClient((_) async {
           requestSent = true;
           return http.Response.bytes(Uint8List.fromList([1]), 200);
@@ -51,7 +51,7 @@ void main() {
       );
 
       await expectLater(
-        fetcher.getBytes(Uri.parse('https://cdn.test/data')),
+        client.getBytes(Uri.parse('https://cdn.test/data')),
         throwsA(
           isA<HttpBytesException$Authentication>().having(
             (e) => e.code,
@@ -65,7 +65,7 @@ void main() {
 
     test('fails fast when the token is empty — no request is sent', () async {
       var requestSent = false;
-      final fetcher = fetcherWith(
+      final client = clientWith(
         MockClient((_) async {
           requestSent = true;
           return http.Response.bytes(Uint8List.fromList([1]), 200);
@@ -74,20 +74,20 @@ void main() {
       );
 
       await expectLater(
-        fetcher.getBytes(Uri.parse('https://cdn.test/data')),
+        client.getBytes(Uri.parse('https://cdn.test/data')),
         throwsA(isA<HttpBytesException$Authentication>()),
       );
       expect(requestSent, isFalse);
     });
 
     test(r'does not swallow a 401 from the server (still $Authentication)', () async {
-      final fetcher = fetcherWith(
+      final client = clientWith(
         MockClient((_) async => http.Response('unauthorized', 401)),
         getToken: () async => 'tok',
       );
 
       await expectLater(
-        fetcher.getBytes(Uri.parse('https://cdn.test/data')),
+        client.getBytes(Uri.parse('https://cdn.test/data')),
         throwsA(
           isA<HttpBytesException$Authentication>().having(
             (e) => e.statusCode,
@@ -99,13 +99,13 @@ void main() {
     });
 
     test(r'does not swallow a 403 from the server (still $Authentication)', () async {
-      final fetcher = fetcherWith(
+      final client = clientWith(
         MockClient((_) async => http.Response('forbidden', 403)),
         getToken: () async => 'tok',
       );
 
       await expectLater(
-        fetcher.getBytes(Uri.parse('https://cdn.test/data')),
+        client.getBytes(Uri.parse('https://cdn.test/data')),
         throwsA(
           isA<HttpBytesException$Authentication>().having(
             (e) => e.statusCode,
@@ -117,13 +117,13 @@ void main() {
     });
 
     test(r'does not special-case a non-auth error (500) — still $Server', () async {
-      final fetcher = fetcherWith(
+      final client = clientWith(
         MockClient((_) async => http.Response('boom', 500)),
         getToken: () async => 'tok',
       );
 
       await expectLater(
-        fetcher.getBytes(Uri.parse('https://cdn.test/data')),
+        client.getBytes(Uri.parse('https://cdn.test/data')),
         throwsA(isA<HttpBytesException$Server>()),
       );
     });
@@ -131,7 +131,7 @@ void main() {
     test('token is read per request', () async {
       var n = 0;
       final seen = <String?>[];
-      final fetcher = fetcherWith(
+      final client = clientWith(
         MockClient((request) async {
           seen.add(request.headers['authorization']);
           return http.Response.bytes(Uint8List.fromList([1]), 200);
@@ -142,8 +142,8 @@ void main() {
         },
       );
 
-      await fetcher.getBytes(Uri.parse('https://cdn.test/a'));
-      await fetcher.getBytes(Uri.parse('https://cdn.test/b'));
+      await client.getBytes(Uri.parse('https://cdn.test/a'));
+      await client.getBytes(Uri.parse('https://cdn.test/b'));
 
       expect(seen, ['Bearer tok-1', 'Bearer tok-2']);
     });
@@ -155,7 +155,7 @@ void main() {
         var hits = 0;
         final release = Completer<void>();
         final seen = <String?>[];
-        final fetcher = fetcherWith(
+        final client = clientWith(
           MockClient((request) async {
             hits++;
             seen.add(request.headers['authorization']);
@@ -169,8 +169,8 @@ void main() {
         );
 
         final url = Uri.parse('https://cdn.test/same');
-        final a = fetcher.getBytes(url);
-        final b = fetcher.getBytes(url);
+        final a = client.getBytes(url);
+        final b = client.getBytes(url);
         // Let both callers pass Bearer and register flights before release.
         await Future<void>.delayed(Duration.zero);
         release.complete();
@@ -186,7 +186,7 @@ void main() {
       () async {
         var hits = 0;
         final release = Completer<void>();
-        final fetcher = fetcherWith(
+        final client = clientWith(
           MockClient((_) async {
             hits++;
             await release.future;
@@ -196,8 +196,8 @@ void main() {
         );
 
         final url = Uri.parse('https://cdn.test/same');
-        final a = fetcher.getBytes(url);
-        final b = fetcher.getBytes(url);
+        final a = client.getBytes(url);
+        final b = client.getBytes(url);
         await Future<void>.delayed(Duration.zero);
         release.complete();
 

@@ -10,7 +10,7 @@ void main() {
   group(r'HttpBytesLoggerMiddleware$Developer', () {
     test('emits on success without changing the body', () async {
       final lines = <String>[];
-      final fetcher = HttpBytesClient(
+      final client = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1, 2]), 200),
         ),
@@ -22,9 +22,9 @@ void main() {
           ),
         ],
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
-      final bytes = await fetcher.getBytes(Uri.parse('https://cdn.test/a.png'));
+      final bytes = await client.getBytes(Uri.parse('https://cdn.test/a.png'));
       expect(bytes, Uint8List.fromList([1, 2]));
       expect(lines, hasLength(1));
       expect(lines.single, contains('[GET] https://cdn.test/a.png'));
@@ -34,7 +34,7 @@ void main() {
 
     test('emits typed error code then rethrows', () async {
       final lines = <String>[];
-      final fetcher = HttpBytesClient(
+      final client = HttpBytesClient(
         client: MockClient((_) async => http.Response('gone', 404)),
         middlewares: <HttpBytesMiddleware>[
           HttpBytesLoggerMiddleware$Developer(
@@ -44,10 +44,10 @@ void main() {
           ),
         ],
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       await expectLater(
-        fetcher.getBytes(Uri.parse('https://cdn.test/missing.png')),
+        client.getBytes(Uri.parse('https://cdn.test/missing.png')),
         throwsA(isA<HttpBytesException$Request>()),
       );
       expect(lines, hasLength(1));
@@ -94,7 +94,7 @@ void main() {
 
     test('logRequest emits before the handler', () async {
       final lines = <String>[];
-      final fetcher = HttpBytesClient(
+      final client = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
         ),
@@ -107,16 +107,16 @@ void main() {
           ),
         ],
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
-      await fetcher.getBytes(Uri.parse('https://cdn.test/req.png'));
+      await client.getBytes(Uri.parse('https://cdn.test/req.png'));
       expect(lines, hasLength(2));
       expect(lines.first, '[GET] https://cdn.test/req.png');
       expect(lines.last, contains('-> 200'));
     });
 
     test('emission failures do not fail the send', () async {
-      final fetcher = HttpBytesClient(
+      final client = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([9]), 200),
         ),
@@ -128,16 +128,16 @@ void main() {
           ),
         ],
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
-      final bytes = await fetcher.getBytes(Uri.parse('https://cdn.test/safe.png'));
+      final bytes = await client.getBytes(Uri.parse('https://cdn.test/safe.png'));
       expect(bytes, Uint8List.fromList([9]));
     });
 
     test('outermost over Retry observes post-retry latency', () async {
       var attempts = 0;
       final lines = <String>[];
-      final fetcher = HttpBytesClient(
+      final client = HttpBytesClient(
         client: MockClient((_) async {
           attempts++;
           if (attempts == 1) {
@@ -161,9 +161,9 @@ void main() {
           ),
         ],
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
-      await fetcher.getBytes(Uri.parse('https://cdn.test/flaky.png'));
+      await client.getBytes(Uri.parse('https://cdn.test/flaky.png'));
       expect(attempts, 2);
       expect(lines, hasLength(1));
       expect(lines.single, contains('-> 200'));

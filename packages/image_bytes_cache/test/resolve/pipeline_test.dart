@@ -17,16 +17,16 @@ void main() {
     maxDelay: Duration(milliseconds: 1),
   );
 
-  HttpBytesClient buildFetcher({
-    required http.Client client,
+  HttpBytesClient buildClient({
+    required http.Client httpClient,
     bool Function(Object error, int attempt)? retryEvaluator,
     Duration connectTimeout = const Duration(seconds: 5),
     Duration receiveTimeout = const Duration(seconds: 5),
     bool Function(int statusCode)? validateStatus,
     List<HttpBytesMiddleware>? extraOuter,
   }) {
-    final fetcher = HttpBytesClient(
-      client: client,
+    final client = HttpBytesClient(
+      client: httpClient,
       validateStatus: validateStatus,
       middlewares: <HttpBytesMiddleware>[
         ...?extraOuter,
@@ -41,29 +41,29 @@ void main() {
         ),
       ],
     );
-    addTearDown(fetcher.close);
-    return fetcher;
+    addTearDown(client.close);
+    return client;
   }
 
   group('HttpBytesRetryMiddleware', () {
     test('retries a 503 then succeeds', () async {
       var attempts = 0;
-      final fetcher = buildFetcher(
-        client: MockClient((_) async {
+      final client = buildClient(
+        httpClient: MockClient((_) async {
           attempts++;
           return attempts == 1 ? http.Response('busy', 503) : http.Response.bytes(Uint8List.fromList([1]), 200);
         }),
       );
 
-      final bytes = await fetcher.getBytes(Uri.parse('https://cdn.test/data'));
+      final bytes = await client.getBytes(Uri.parse('https://cdn.test/data'));
       expect(bytes, Uint8List.fromList([1]));
       expect(attempts, 2);
     });
 
     test('retries a network failure then succeeds', () async {
       var attempts = 0;
-      final fetcher = buildFetcher(
-        client: MockClient((_) async {
+      final client = buildClient(
+        httpClient: MockClient((_) async {
           attempts++;
           if (attempts == 1) {
             throw http.ClientException('socket hung up');
@@ -72,22 +72,22 @@ void main() {
         }),
       );
 
-      final bytes = await fetcher.getBytes(Uri.parse('https://cdn.test/data'));
+      final bytes = await client.getBytes(Uri.parse('https://cdn.test/data'));
       expect(bytes, Uint8List.fromList([7]));
       expect(attempts, 2);
     });
 
     test('does not retry a non-transient 404 (default policy)', () async {
       var attempts = 0;
-      final fetcher = buildFetcher(
-        client: MockClient((_) async {
+      final client = buildClient(
+        httpClient: MockClient((_) async {
           attempts++;
           return http.Response('missing', 404);
         }),
       );
 
       await expectLater(
-        fetcher.getBytes(Uri.parse('https://cdn.test/data')),
+        client.getBytes(Uri.parse('https://cdn.test/data')),
         throwsA(isA<HttpBytesException$Request>()),
       );
       expect(attempts, 1, reason: '4xx client errors are not transient');
@@ -95,30 +95,30 @@ void main() {
 
     test('a custom retryEvaluator overrides the default policy', () async {
       var attempts = 0;
-      final fetcher = buildFetcher(
-        client: MockClient((_) async {
+      final client = buildClient(
+        httpClient: MockClient((_) async {
           attempts++;
           return attempts == 1 ? http.Response('missing', 404) : http.Response.bytes(Uint8List.fromList([1]), 200);
         }),
         retryEvaluator: (_, _) => true,
       );
 
-      final bytes = await fetcher.getBytes(Uri.parse('https://cdn.test/data'));
+      final bytes = await client.getBytes(Uri.parse('https://cdn.test/data'));
       expect(bytes, Uint8List.fromList([1]));
       expect(attempts, 2);
     });
 
     test('skips retry when no-retry context is set', () async {
       var attempts = 0;
-      final fetcher = buildFetcher(
-        client: MockClient((_) async {
+      final client = buildClient(
+        httpClient: MockClient((_) async {
           attempts++;
           return http.Response('busy', 503);
         }),
       );
 
       await expectLater(
-        fetcher.send(
+        client.send(
           HttpBytesRequest(
             http.Request('GET', Uri.parse('https://cdn.test/once')),
           ),
@@ -132,8 +132,8 @@ void main() {
     test('honors delta-seconds Retry-After on 503', () async {
       var attempts = 0;
       final sw = Stopwatch();
-      final fetcher = buildFetcher(
-        client: MockClient((_) async {
+      final client = buildClient(
+        httpClient: MockClient((_) async {
           attempts++;
           if (attempts == 1) {
             sw.start();
@@ -148,14 +148,14 @@ void main() {
         }),
       );
 
-      await fetcher.getBytes(Uri.parse('https://cdn.test/data'));
+      await client.getBytes(Uri.parse('https://cdn.test/data'));
       expect(attempts, 2);
       expect(sw.elapsedMilliseconds, lessThan(500));
     });
 
     test('the total budget (maxElapsed) stops retries early', () async {
       var attempts = 0;
-      final fetcher = HttpBytesClient(
+      final client = HttpBytesClient(
         client: MockClient((_) async {
           attempts++;
           await Future<void>.delayed(const Duration(milliseconds: 30));
@@ -173,10 +173,10 @@ void main() {
           ),
         ],
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       await expectLater(
-        fetcher.getBytes(Uri.parse('https://cdn.test/data')),
+        client.getBytes(Uri.parse('https://cdn.test/data')),
         throwsA(isA<HttpBytesException$Server>()),
       );
       expect(attempts, 1, reason: 'budget exhausted after the first attempt — no retry');
@@ -261,9 +261,9 @@ void main() {
     test(r'throws $Timeout, does not retry, and aborts the socket', () async {
       var attempts = 0;
       var aborted = false;
-      final fetcher = buildFetcher(
+      final client = buildClient(
         connectTimeout: const Duration(milliseconds: 30),
-        client: MockClient.streaming((request, _) async {
+        httpClient: MockClient.streaming((request, _) async {
           attempts++;
           (request as http.Abortable).abortTrigger?.then((_) => aborted = true).ignore();
           await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -272,7 +272,7 @@ void main() {
       );
 
       await expectLater(
-        fetcher.getBytes(Uri.parse('https://cdn.test/slow')),
+        client.getBytes(Uri.parse('https://cdn.test/slow')),
         throwsA(isA<HttpBytesException$Timeout>()),
       );
       await Future<void>.delayed(const Duration(milliseconds: 10));
@@ -283,7 +283,7 @@ void main() {
     test('receive timeout fires when the body stalls mid-stream and aborts', () async {
       final body = StreamController<List<int>>();
       var aborted = false;
-      final fetcher = HttpBytesClient(
+      final client = HttpBytesClient(
         client: MockClient.streaming((request, _) async {
           (request as http.Abortable).abortTrigger?.then((_) => aborted = true).ignore();
           body.add(const [1, 2]);
@@ -296,10 +296,10 @@ void main() {
           ),
         ],
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       await expectLater(
-        fetcher.getBytes(Uri.parse('https://cdn.test/slow')),
+        client.getBytes(Uri.parse('https://cdn.test/slow')),
         throwsA(
           isA<HttpBytesException$Timeout>().having(
             (e) => e.code,
@@ -316,15 +316,15 @@ void main() {
 
   group('Cancellation', () {
     test(r'cancel() surfaces $Cancelled to the caller', () async {
-      final fetcher = buildFetcher(
-        client: MockClient.streaming((request, _) async {
+      final client = buildClient(
+        httpClient: MockClient.streaming((request, _) async {
           await (request as http.Abortable).abortTrigger;
           throw http.RequestAbortedException(request.url);
         }),
       );
 
       final token = CancelToken();
-      final future = fetcher.getBytes(
+      final future = client.getBytes(
         Uri.parse('https://cdn.test/slow'),
         cancelToken: token,
       );
@@ -335,15 +335,15 @@ void main() {
 
     test(r'already-cancelled CancelToken surfaces $Cancelled without a wire hit', () async {
       var attempts = 0;
-      final fetcher = buildFetcher(
-        client: MockClient((_) async {
+      final client = buildClient(
+        httpClient: MockClient((_) async {
           attempts++;
           return http.Response.bytes(Uint8List.fromList([1]), 200);
         }),
       );
 
       expect(
-        () => fetcher.getBytes(
+        () => client.getBytes(
           Uri.parse('https://cdn.test/pre'),
           cancelToken: CancelToken()..cancel(),
         ),
@@ -355,49 +355,49 @@ void main() {
 
   group('validateStatus', () {
     test('a custom predicate makes a 404 a success', () async {
-      final fetcher = buildFetcher(
-        client: MockClient(
+      final client = buildClient(
+        httpClient: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([9]), 404),
         ),
         validateStatus: (c) => c == 404,
       );
 
-      final bytes = await fetcher.getBytes(Uri.parse('https://cdn.test/x'));
+      final bytes = await client.getBytes(Uri.parse('https://cdn.test/x'));
       expect(bytes, Uint8List.fromList([9]));
     });
 
     test('a predicate rejecting 200 throws', () async {
-      final fetcher = buildFetcher(
-        client: MockClient(
+      final client = buildClient(
+        httpClient: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
         ),
         validateStatus: (_) => false,
       );
 
       await expectLater(
-        fetcher.getBytes(Uri.parse('https://cdn.test/x')),
+        client.getBytes(Uri.parse('https://cdn.test/x')),
         throwsA(isA<HttpBytesException>()),
       );
     });
 
     test(r'the default still maps 401 to $Authentication', () async {
-      final fetcher = buildFetcher(
-        client: MockClient((_) async => http.Response('no', 401)),
+      final client = buildClient(
+        httpClient: MockClient((_) async => http.Response('no', 401)),
       );
 
       await expectLater(
-        fetcher.getBytes(Uri.parse('https://cdn.test/x')),
+        client.getBytes(Uri.parse('https://cdn.test/x')),
         throwsA(isA<HttpBytesException$Authentication>()),
       );
     });
 
     test(r'the default still maps 403 to $Authentication', () async {
-      final fetcher = buildFetcher(
-        client: MockClient((_) async => http.Response('no', 403)),
+      final client = buildClient(
+        httpClient: MockClient((_) async => http.Response('no', 403)),
       );
 
       await expectLater(
-        fetcher.getBytes(Uri.parse('https://cdn.test/x')),
+        client.getBytes(Uri.parse('https://cdn.test/x')),
         throwsA(isA<HttpBytesException$Authentication>()),
       );
     });
@@ -406,8 +406,8 @@ void main() {
   group('Receive progress', () {
     test('reports cumulative bytes with total from content-length', () async {
       final events = <(int, int?)>[];
-      final fetcher = buildFetcher(
-        client: MockClient.streaming(
+      final client = buildClient(
+        httpClient: MockClient.streaming(
           (_, _) async => http.StreamedResponse(
             Stream<List<int>>.fromIterable([
               [1, 2, 3],
@@ -419,7 +419,7 @@ void main() {
         ),
       );
 
-      final bytes = await fetcher.getBytes(
+      final bytes = await client.getBytes(
         Uri.parse('https://cdn.test/x'),
         onBytesProgress: (received, total) => events.add((received, total)),
       );
@@ -429,8 +429,8 @@ void main() {
 
     test('reports null total when Content-Length is unknown', () async {
       final events = <(int, int?)>[];
-      final fetcher = buildFetcher(
-        client: MockClient.streaming(
+      final client = buildClient(
+        httpClient: MockClient.streaming(
           (_, _) async => http.StreamedResponse(
             Stream<List<int>>.fromIterable([
               [9, 9],
@@ -440,7 +440,7 @@ void main() {
         ),
       );
 
-      await fetcher.getBytes(
+      await client.getBytes(
         Uri.parse('https://cdn.test/x'),
         onBytesProgress: (received, total) => events.add((received, total)),
       );
@@ -473,18 +473,18 @@ void main() {
     test('attaches Bearer, retries 503, then succeeds', () async {
       var attempts = 0;
       String? seenAuth;
-      final fetcher = buildFetcher(
+      final client = buildClient(
         extraOuter: <HttpBytesMiddleware>[
           HttpBytesBearerMiddleware(getToken: () async => 'tok'),
         ],
-        client: MockClient((request) async {
+        httpClient: MockClient((request) async {
           attempts++;
           seenAuth = request.headers['authorization'];
           return attempts == 1 ? http.Response('busy', 503) : http.Response.bytes(Uint8List.fromList([3]), 200);
         }),
       );
 
-      final bytes = await fetcher.getBytes(Uri.parse('https://cdn.test/img'));
+      final bytes = await client.getBytes(Uri.parse('https://cdn.test/img'));
       expect(bytes, Uint8List.fromList([3]));
       expect(attempts, 2);
       expect(seenAuth, 'Bearer tok');
@@ -501,15 +501,15 @@ void main() {
         };
       };
 
-      final fetcher = HttpBytesClient(
+      final client = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
         ),
         middlewares: <HttpBytesMiddleware>[named('outer'), named('inner')],
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
-      await fetcher.getBytes(Uri.parse('https://cdn.test/order'));
+      await client.getBytes(Uri.parse('https://cdn.test/order'));
       expect(order, ['in:outer', 'in:inner', 'out:inner', 'out:outer']);
     });
   });
@@ -525,30 +525,30 @@ void main() {
     }
 
     test('429 is Request and carries retry-after', () async {
-      final fetcher = HttpBytesClient(
+      final client = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response('slow', 429, headers: {'retry-after': '5'}),
         ),
         middlewares: const [],
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       final e = await failOf(
-        () => fetcher.getBytes(Uri.parse('https://cdn.test/x')),
+        () => client.getBytes(Uri.parse('https://cdn.test/x')),
       );
       expect(e, isA<HttpBytesException$Request>());
       expect((e.data! as Map)['retry-after'], '5');
     });
 
     test('500 is Server', () async {
-      final fetcher = HttpBytesClient(
+      final client = HttpBytesClient(
         client: MockClient((_) async => http.Response('boom', 500)),
         middlewares: const [],
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       final e = await failOf(
-        () => fetcher.getBytes(Uri.parse('https://cdn.test/x')),
+        () => client.getBytes(Uri.parse('https://cdn.test/x')),
       );
       expect(e, isA<HttpBytesException$Server>());
     });
