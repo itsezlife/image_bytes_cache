@@ -152,6 +152,93 @@ void main() {
       expect(hits, 1);
     });
 
+    test(
+      'canceling one coalesced subscriber leaves the other running',
+      () async {
+        var hits = 0;
+        var aborted = false;
+        final release = Completer<void>();
+        final tokenA = CancelToken();
+        final tokenB = CancelToken();
+        final fetcher = HttpBytesFetcher(
+          middlewares: const [],
+          client: _AbortHonoringClient(
+            onRequest: (request) {
+              hits++;
+              if (request case http.Abortable(:final abortTrigger?)) {
+                unawaited(
+                  abortTrigger.whenComplete(() {
+                    aborted = true;
+                    if (!release.isCompleted) {
+                      release.completeError(StateError('flight aborted'));
+                    }
+                  }),
+                );
+              }
+            },
+            bodyAfter: () async {
+              await release.future;
+              return Uint8List.fromList([9]);
+            },
+          ),
+        );
+        addTearDown(fetcher.close);
+
+        final url = Uri.parse('https://cdn.example.com/coalesce-cancel-one.svg');
+        final a = fetcher.getBytes(url, cancelToken: tokenA);
+        final b = fetcher.getBytes(url, cancelToken: tokenB);
+        await Future<void>.delayed(Duration.zero);
+
+        tokenA.cancel();
+        await expectLater(a, throwsA(isA<HttpBytesException$Cancelled>()));
+        expect(aborted, isFalse);
+
+        release.complete();
+        expect(await b, Uint8List.fromList([9]));
+        expect(hits, 1);
+        expect(aborted, isFalse);
+      },
+    );
+
+    test(
+      'canceling the last coalesced subscriber aborts the flight',
+      () async {
+        var aborted = false;
+        final never = Completer<void>();
+        final tokenA = CancelToken();
+        final tokenB = CancelToken();
+        final fetcher = HttpBytesFetcher(
+          middlewares: const [],
+          client: _AbortHonoringClient(
+            onRequest: (request) {
+              if (request case http.Abortable(:final abortTrigger?)) {
+                unawaited(abortTrigger.whenComplete(() => aborted = true));
+              }
+            },
+            bodyAfter: () async {
+              await never.future;
+              return Uint8List.fromList([9]);
+            },
+          ),
+        );
+        addTearDown(fetcher.close);
+
+        final url = Uri.parse('https://cdn.example.com/coalesce-cancel-last.svg');
+        final a = fetcher.getBytes(url, cancelToken: tokenA);
+        final b = fetcher.getBytes(url, cancelToken: tokenB);
+        await Future<void>.delayed(Duration.zero);
+
+        tokenA.cancel();
+        await expectLater(a, throwsA(isA<HttpBytesException$Cancelled>()));
+        expect(aborted, isFalse);
+
+        tokenB.cancel();
+        await expectLater(b, throwsA(isA<HttpBytesException$Cancelled>()));
+        await Future<void>.delayed(Duration.zero);
+        expect(aborted, isTrue);
+      },
+    );
+
     test('middleware injects headers onto the wire request', () async {
       String? seenAuth;
       HttpBytesHandler injectAuth(HttpBytesHandler inner) {
@@ -667,18 +754,41 @@ final class _GatedChunkedBodyClient extends http.BaseClient {
   }
 }
 
-/// Test client that aborts when [http.Abortable.abortTrigger] completes.
+/// Test client that honors [http.Abortable.abortTrigger].
+///
+/// When [bodyAfter] is null, waits for abort then throws
+/// [http.RequestAbortedException] (legacy cancel/timeout tests).
+/// When [bodyAfter] is set, races abort against the body future — abort wins
+/// with [http.RequestAbortedException], otherwise returns a 200 with those bytes.
 final class _AbortHonoringClient extends http.BaseClient {
-  _AbortHonoringClient({required this.onRequest});
+  _AbortHonoringClient({
+    required this.onRequest,
+    this.bodyAfter,
+  });
 
   final void Function(http.BaseRequest request) onRequest;
+  final Future<Uint8List> Function()? bodyAfter;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     onRequest(request);
     if (request case http.Abortable(:final abortTrigger?)) {
-      await abortTrigger;
-      throw http.RequestAbortedException(request.url);
+      final body = bodyAfter;
+      if (body == null) {
+        await abortTrigger;
+        throw http.RequestAbortedException(request.url);
+      }
+
+      final bytes = await Future.any<Uint8List>([
+        body(),
+        abortTrigger.then((_) => throw http.RequestAbortedException(request.url)),
+      ]);
+      return http.StreamedResponse(
+        Stream.value(bytes),
+        200,
+        contentLength: bytes.length,
+        request: request,
+      );
     }
     throw StateError('expected AbortableRequest with abortTrigger');
   }

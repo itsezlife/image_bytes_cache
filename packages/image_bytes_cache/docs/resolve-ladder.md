@@ -83,11 +83,12 @@ GET bodies only. Callers own disk cache and decode.
 Middleware list order is outermost first (first entry wraps the rest). Coalesce
 identity is `ImageCacheKey` from the URL + headers assembled in `_sendUnstreamed`
 (request-mutating middleware still affects the wire request). Concurrent calls
-that share that identity share one in-flight `Future`.
+that share that identity share one in-flight GET; each caller still gets its own
+`Future` (so per-caller cancel can fail one joiner without aborting the flight).
 
 `send` / `getBytes` only forward into `_sendUnstreamed` (token + `AbortableRequest`
-+ pool/coalesce). `_createHandler` is wire-only: `Client.send(request)`, status,
-progress `ByteStream.map`, then the middleware chain (Timeout connect/receive).
++ pool/coalesce). `_createHandler` is Client.send-only: status, progress
+`ByteStream.map`, then the middleware chain (Timeout connect/receive).
 Failures surface only as `HttpBytesException` variants (`HttpBytesException$Network`,
 `$Request`, `$Server`, `$Authentication`, `$Timeout`, `$Cancelled`, `$Internal`),
 each with `code` / `statusCode` / `message` / optional `error` / `data`. Non-2xx
@@ -95,12 +96,16 @@ maps by status: 401/403 → `$Authentication`, 5xx → `$Server`, else `$Request
 `getBytes` remains a convenience over `send(HttpBytesRequest)` (body via `toBytes`
 / cached `body`).
 
-Each `send` seeds a per-call `CancelToken` into context (`HttpBytesContextKeys.cancelToken`);
-the Abortable GET uses `whenCancel` as `abortTrigger`. `HttpBytesTimeoutMiddleware` applies
-**connect** (headers) and **receive** (idle gap on the body `ByteStream`) timeouts
-and returns a cloned response with the wrapped stream. Defaults are 15s each
-(override via `HttpBytesContextKeys.connectTimeout` / `receiveTimeout`, or legacy
-`timeout` / `duration` for connect).
+Each `send` creates a **flight** [CancelToken] stored in context
+(`HttpBytesContextKeys.cancelToken`) and used as the Abortable GET
+`abortTrigger`. Callers may pass their own token: canceling one coalesced
+subscriber fails only that caller with `$Cancelled` and leaves the shared GET
+running; canceling the **last** subscriber cancels the flight token (socket
+abort). `HttpBytesTimeoutMiddleware` cancels that same flight token and still
+surfaces `$Timeout` (not `$Cancelled`). Connect bounds headers; receive bounds
+idle body gaps. Defaults are 15s each (override via
+`HttpBytesContextKeys.connectTimeout` / `receiveTimeout`, or legacy `timeout` /
+`duration` for connect).
 
 `HttpBytesRetryMiddleware` (opt-in) retries idempotent GETs on transient failures
 (`$Network` / 408 / 425 / 429 / selected 5xx), honors delta-seconds `Retry-After`,
@@ -113,8 +118,8 @@ via `developer.log` (`http_bytes`); place outermost to include retry time.
 When `onBytesProgress` is supplied on the caller that **starts** the in-flight
 GET, the fetcher reports cumulative bytes as the response body is read (`total`
 from Content-Length when present). Without a sink, the body is consolidated
-without inventing chunk events. Coalesced joiners share the same `Future`; the
-progress sink does not change coalesce identity.
+without inventing chunk events. Coalesced joiners each get their own Future to
+the same buffered response; the progress sink does not change coalesce identity.
 
 After `close`, new `send` / `getBytes` calls throw `HttpBytesException$Internal`;
 in-flight work may still finish or fail. If the fetcher created its own

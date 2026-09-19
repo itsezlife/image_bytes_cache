@@ -115,8 +115,9 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
 - Web payload Cache keys are synthetic `https://image-bytes.invalid/...`, not
   the real fetch URL.
 - `HttpBytesFetcher` Timeout middleware (connect + receive) does not cover pool
-  wait time (intentionally unbounded queue). AbortableRequest uses per-send
-  `CancelToken.whenCancel` after a slot is acquired.
+  wait time (intentionally unbounded queue). AbortableRequest uses a shared
+  **flight** `CancelToken.whenCancel` after a slot is acquired; per-caller tokens
+  cancel only that subscriber until the last one aborts the flight.
 - Chrome open test is the honesty check for Cache/OPFS and a CI merge gate; do
   not merge web blob changes on green VM tests alone.
 

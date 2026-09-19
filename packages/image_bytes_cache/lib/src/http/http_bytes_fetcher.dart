@@ -79,7 +79,11 @@ extension type HttpBytesMiddlewareWrapper._(HttpBytesMiddleware _fn) {
 ///
 /// Values live on the per-send `context` map.
 abstract final class HttpBytesContextKeys {
-  /// Effective per-send [CancelToken] (abort signal for AbortableRequest).
+  /// Shared flight [CancelToken] for this send (AbortableRequest abort + Timeout).
+  ///
+  /// Coalesced subscribers each keep their own caller token; only this flight
+  /// token is stored in context and wired as `abortTrigger`. Last-subscriber
+  /// cancel (or Timeout) cancels it.
   static const cancelToken = 'cancelToken';
 
   /// Per-request connect timeout override ([Duration] / `int` ms / [DateTime]).
@@ -228,6 +232,14 @@ final class HttpBytesResponse {
 /// {@template http_bytes_fetcher}
 /// HTTP GET for response bodies, with middlewares, concurrency cap, and
 /// in-flight coalescing.
+///
+/// Concurrent callers that share the same coalesce identity join one in-flight
+/// GET. Each caller may pass its own [CancelToken]:
+/// - canceling one subscriber completes only that caller with
+///   [HttpBytesException$Cancelled] and leaves the flight running;
+/// - canceling the last subscriber cancels the shared flight token (socket
+///   abort). Timeout middleware cancels that same flight token and still
+///   surfaces [HttpBytesException$Timeout], not Cancelled.
 /// {@endtemplate}
 final class HttpBytesFetcher {
   /// {@macro http_bytes_fetcher}
@@ -298,7 +310,7 @@ final class HttpBytesFetcher {
   /// Composed middleware chain ending at [http.Client.send].
   late final HttpBytesHandler _handler;
 
-  final Map<String, Future<HttpBytesResponse>> _inFlight = {};
+  final Map<String, _HttpBytesInFlight> _inFlight = {};
 
   var _closed = false;
 
@@ -341,8 +353,10 @@ final class HttpBytesFetcher {
 
   /// Builds the Abortable GET, seeds context, coalesces, and runs middlewares.
   ///
-  /// Sole place that resolves [CancelToken] and constructs [http.AbortableRequest].
-  /// Pool and in-flight coalesce wrap the call to [_handler].
+  /// Sole place that owns flight [CancelToken] assembly and
+  /// [http.AbortableRequest]. Pool and coalesce wrap the call to [_handler].
+  /// Caller [cancelToken]s are per-subscriber; the flight token in context is
+  /// what Timeout / flight abort observe.
   Future<HttpBytesResponse> _sendUnstreamed({
     required Uri url,
     Map<String, String>? headers,
@@ -358,9 +372,31 @@ final class HttpBytesFetcher {
       );
     }
 
+    final callerToken = cancelToken ?? CancelToken();
+    if (callerToken.isCancelled) {
+      return Future<HttpBytesResponse>.error(
+        HttpBytesException$Cancelled(
+          error: CancelledException(callerToken.reason),
+          data: <String, Object?>{'url': url.toString()},
+        ),
+      );
+    }
+
+    // Identity is assembled here (pre-middleware). Request-mutating middleware
+    // still affects the wire request but not this coalesce key.
+    final key = ImageCacheKey.fromUrl(
+      url.toString(),
+      headers: headers ?? const <String, String>{},
+    ).value;
+
+    final existing = _inFlight[key];
+    if (existing != null) {
+      return existing.addSubscriber(callerToken, url);
+    }
+
     final ctx = context ?? <String, Object?>{};
-    final effectiveToken = cancelToken ?? CancelToken();
-    ctx[HttpBytesContextKeys.cancelToken] = effectiveToken;
+    final flightToken = CancelToken();
+    ctx[HttpBytesContextKeys.cancelToken] = flightToken;
     if (onBytesProgress != null) {
       ctx[HttpBytesContextKeys.onBytesProgress] = onBytesProgress;
     }
@@ -368,49 +404,20 @@ final class HttpBytesFetcher {
     final request = http.AbortableRequest(
       'GET',
       url,
-      abortTrigger: effectiveToken.whenCancel,
+      abortTrigger: flightToken.whenCancel,
     );
     if (headers != null) {
       request.headers.addAll(headers);
     }
 
-    if (effectiveToken.isCancelled) {
-      return Future<HttpBytesResponse>.error(
-        HttpBytesException$Cancelled(
-          error: CancelledException(effectiveToken.reason),
-          data: <String, Object?>{'url': url.toString()},
-        ),
-      );
-    }
-
-    final key = ImageCacheKey.fromUrl(
-      url.toString(),
-      headers: request.headers,
-    ).value;
-    final existing = _inFlight[key];
-    if (existing != null) return existing;
-
-    final completer = Completer<HttpBytesResponse>();
-    final flight = completer.future.whenComplete(() {
-      _inFlight.remove(key);
-    });
+    final flight = _HttpBytesInFlight(
+      flightToken: flightToken,
+      onAbandoned: () => _inFlight.remove(key),
+    );
     _inFlight[key] = flight;
 
     void throwError(Object error, StackTrace stackTrace) {
-      if (completer.isCompleted) return;
-      if (error is HttpBytesException) {
-        completer.completeError(error, stackTrace);
-      } else {
-        completer.completeError(
-          HttpBytesException$Internal(
-            code: 'unknown_error',
-            message: 'Unknown error.',
-            statusCode: 0,
-            error: error,
-          ),
-          stackTrace,
-        );
-      }
+      flight.completeError(error, stackTrace);
     }
 
     runZonedGuarded<void>(
@@ -431,14 +438,12 @@ final class HttpBytesFetcher {
               );
               return;
             }
-            if (!completer.isCompleted) {
-              completer.complete(
-                response.clone(
-                  stream: http.ByteStream.fromBytes(bytes),
-                  body: bytes,
-                ),
-              );
-            }
+            flight.completeSuccess(
+              response.clone(
+                stream: http.ByteStream.fromBytes(bytes),
+                body: bytes,
+              ),
+            );
           } on Object catch (error, stackTrace) {
             throwError(error, stackTrace);
           }
@@ -447,7 +452,11 @@ final class HttpBytesFetcher {
       throwError,
     );
 
-    return flight;
+    flight.done.whenComplete(() {
+      _inFlight.remove(key);
+    });
+
+    return flight.addSubscriber(callerToken, url);
   }
 
   /// Closes the pool and, when this instance created the client, the client.
@@ -461,13 +470,113 @@ final class HttpBytesFetcher {
   }
 }
 
-/// Creates the middleware chain around wire [http.Client.send].
+/// One coalesced in-flight GET with N caller subscribers.
+///
+/// [flightToken] is the AbortableRequest abort signal and the context token
+/// Timeout cancels. Each [addSubscriber] gets its own Future: canceling that
+/// caller's token fails only that Future; when the last subscriber leaves via
+/// cancel, [flightToken] is cancelled so the socket aborts.
+final class _HttpBytesInFlight {
+  _HttpBytesInFlight({
+    required this.flightToken,
+    required this.onAbandoned,
+  });
+
+  final CancelToken flightToken;
+  final void Function() onAbandoned;
+
+  final Completer<HttpBytesResponse> _flight = Completer<HttpBytesResponse>();
+  final Set<_HttpBytesSubscriber> _subscribers = <_HttpBytesSubscriber>{};
+
+  /// Completes when the shared GET finishes (success or error), after fan-out.
+  Future<void> get done => _flight.future.then<void>((_) {}, onError: (_, _) {});
+
+  Future<HttpBytesResponse> addSubscriber(CancelToken callerToken, Uri url) {
+    final completer = Completer<HttpBytesResponse>();
+    final subscriber = _HttpBytesSubscriber(
+      token: callerToken,
+      completer: completer,
+    );
+    _subscribers.add(subscriber);
+
+    // Fan-out flight result to this subscriber if still waiting.
+    _flight.future.then(
+      (response) {
+        if (!completer.isCompleted) {
+          completer.complete(response);
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!completer.isCompleted) {
+          completer.completeError(error, stackTrace);
+        }
+      },
+    );
+
+    // Per-caller cancel: drop this subscriber; abort flight only when last.
+    unawaited(
+      callerToken.whenCancel.then((_) {
+        if (completer.isCompleted) return;
+        completer.completeError(
+          HttpBytesException$Cancelled(
+            error: CancelledException(callerToken.reason),
+            data: <String, Object?>{'url': url.toString()},
+          ),
+        );
+        _removeSubscriber(subscriber);
+      }),
+    );
+
+    return completer.future;
+  }
+
+  void completeSuccess(HttpBytesResponse response) {
+    if (_flight.isCompleted) return;
+    _flight.complete(response);
+    _subscribers.clear();
+  }
+
+  void completeError(Object error, StackTrace stackTrace) {
+    if (_flight.isCompleted) return;
+    final wrapped = error is HttpBytesException
+        ? error
+        : HttpBytesException$Internal(
+            code: 'unknown_error',
+            message: 'Unknown error.',
+            statusCode: 0,
+            error: error,
+          );
+    _flight.completeError(wrapped, stackTrace);
+    _subscribers.clear();
+  }
+
+  void _removeSubscriber(_HttpBytesSubscriber subscriber) {
+    if (!_subscribers.remove(subscriber)) return;
+    if (_subscribers.isNotEmpty || _flight.isCompleted) return;
+    // Last live subscriber cancelled before the flight finished — abort socket
+    // and drop the coalesce key so a new caller starts a fresh GET.
+    onAbandoned();
+    flightToken.cancel();
+  }
+}
+
+final class _HttpBytesSubscriber {
+  _HttpBytesSubscriber({
+    required this.token,
+    required this.completer,
+  });
+
+  final CancelToken token;
+  final Completer<HttpBytesResponse> completer;
+}
+
+/// Creates the middleware chain around [http.Client.send].
 ///
 /// Isolated from pool, coalesce, and token assembly. Those live in
 /// [HttpBytesFetcher._sendUnstreamed].
 HttpBytesHandler _createHandler(
   http.Client internalClient,
-  HttpBytesMiddleware middleware,
+  HttpBytesMiddlewareWrapper pipeline,
   bool Function(int statusCode)? validateStatusDefault,
 ) {
   void throwError(
@@ -587,7 +696,7 @@ HttpBytesHandler _createHandler(
     return completer.future;
   }
 
-  return middleware(httpHandler);
+  return pipeline(httpHandler);
 }
 
 /// Default success predicate for image GETs: 2xx only.
