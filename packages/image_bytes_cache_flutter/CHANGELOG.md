@@ -5,7 +5,7 @@
 - **CHANGED**: Paint adapters surface sealed `HttpBytesException` from core
   on network miss failures. Catch `$Network` / `$Request` / `$Timeout` / … instead
   of `ClientException` or raw socket errors when handling `onError`. Aligns with
-  core `HttpBytesClient` (renamed from `HttpBytesFetcher` in 0.2.0).
+  core `HttpBytesClient`.
 
 ## 0.1.0
 
