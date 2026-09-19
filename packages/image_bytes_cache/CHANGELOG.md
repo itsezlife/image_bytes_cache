@@ -1,3 +1,28 @@
+## Unreleased
+
+- **ADDED**: HTTP middleware on `HttpBytesFetcher` (`src/http/`). List order is
+  outermost first. `null` middlewares installs Timeout only; `[]` installs none.
+  Opt-in: `HttpBytesRetryMiddleware` (full-jitter backoff, honors `Retry-After`),
+  `HttpBytesBearerMiddleware` (sets `Authorization` from `getToken`, no logout
+  or refresh), `HttpBytesLoggerMiddleware$Developer` (`developer.log`, no
+  bodies or headers). Barrel also exports `CancelToken` / `CancelledException`.
+- **ADDED**: Sealed `HttpBytesException` variants: `$Network`, `$Request`,
+  `$Server`, `$Authentication`, `$Timeout`, `$Cancelled`, `$Internal`. Non-2xx
+  maps by status (401/403 → auth, 5xx → server, else request). No HTTP response
+  is `$Network`. Catch these instead of `ClientException`, `SocketException`,
+  or raw `TimeoutException`.
+- **ADDED**: Coalesce-aware cancel. Same-identity callers share one GET.
+  Canceling one leaves the others running; canceling the last aborts the
+  socket. Timeout still throws `$Timeout`, not `$Cancelled`.
+- **ADDED**: `HttpBytesContext` for per-send overrides (`connectTimeout`,
+  `receiveTimeout`, `noRetry`, `retries`, and so on).
+- **CHANGED**: Fetcher file moved to `src/http/http_bytes_fetcher.dart`.
+  Connect and receive idle timeouts are middleware, not fetcher fields. Waiting
+  for a pool slot is still unbounded. In-flight coalesce uses the
+  post-middleware `ImageCacheKey`, so Bearer-injected `Authorization` keeps
+  different tokens from sharing a flight. Durable resolve keys still follow
+  request headers / `cacheKey`.
+
 ## 0.1.0
 
 - **ADDED**: Optional honest bytes-progress reporting on the resolve ladder.

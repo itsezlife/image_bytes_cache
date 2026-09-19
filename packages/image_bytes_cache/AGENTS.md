@@ -35,7 +35,8 @@ More: [`docs/development.md`](docs/development.md).
 | --- | --- | --- |
 | `image_bytes_cache.dart` | `ImageCacheKey`, retention, ports, `IndexedImageBytesCache`, Memory/NoOp, `ImageBytesCache` open/configure | [architecture](docs/architecture.md), [storage](docs/storage.md) |
 | `image_bytes_resolver.dart` | Ladder: cache → fetch → write-through | [resolve-ladder](docs/resolve-ladder.md) |
-| `http_bytes_fetcher.dart` | Pool + in-flight coalesce GET | [resolve-ladder](docs/resolve-ladder.md) |
+| `http/http_bytes_fetcher.dart` | HTTP GET types, middleware chain, fetcher | [resolve-ladder](docs/resolve-ladder.md) |
+| `http/middlewares/` | HTTP middlewares (`Timeout`, opt-in `Retry`, `Bearer`, `Logger$Developer`) | [resolve-ladder](docs/resolve-ladder.md) |
 | `image_bytes_diagnostics.dart` | Soft-failure policy (`silent` / `developer` / `onEvent`) | [resolve-ladder](docs/resolve-ladder.md) |
 | `image_bytes_index_document.dart` | Versioned index JSON codec (`v:1`) | [storage](docs/storage.md) |
 | `image_bytes_web_keys.dart` | Synthetic `.invalid` Cache URLs + OPFS dir names | [storage](docs/storage.md) |
@@ -107,14 +108,19 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
 - Coalesce and durable identity use `ImageCacheKey` (length-prefixed fingerprint
   material; no `url|headers` join). Relative vs absolute `Uri.base` equivalents
   share one key; explicit `cacheKey` is full identity (headers on wire only).
+  In-flight coalesce keys are **post-middleware** (Bearer `Authorization`
+  participates); durable resolve keys still use request headers / `cacheKey`.
 - Distinct URLs that share a basename must not collide on disk (fingerprint).
 - VM store under app **cache** root, not documents. Web ignores `directory`.
 - `MemoryImageBytesCache` / `NoOpImageBytesCache` stay usable after `close`;
   Indexed and durable wrappers throw after close.
 - Web payload Cache keys are synthetic `https://image-bytes.invalid/...`, not
   the real fetch URL.
-- `HttpBytesFetcher` timeout does not cover pool wait time (intentionally
-  unbounded queue); timeout uses `AbortableRequest` after a slot is acquired.
+- `HttpBytesFetcher` Timeout middleware (connect + receive) does not cover pool
+  wait time (intentionally unbounded queue). AbortableRequest uses a shared
+  **flight** `CancelToken.whenCancel` after a slot is acquired; per-caller tokens
+  cancel only that subscriber until the last one aborts the flight. Per-send
+  overrides live on typed `HttpBytesContext` (sealed `$` exceptions for hosts).
 - Chrome open test is the honesty check for Cache/OPFS and a CI merge gate; do
   not merge web blob changes on green VM tests alone.
 

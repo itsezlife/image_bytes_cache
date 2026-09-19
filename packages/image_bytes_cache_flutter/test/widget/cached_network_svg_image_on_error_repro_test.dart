@@ -103,7 +103,11 @@ void main() {
       await tester.pump();
 
       expect(onErrorCalled.isCompleted, isTrue);
-      expect(capturedError, isA<SocketException>());
+      expect(capturedError, isA<HttpBytesException$Network>());
+      expect(
+        (capturedError! as HttpBytesException$Network).error,
+        isA<SocketException>(),
+      );
       expect(capturedStack, isNotNull);
     },
   );

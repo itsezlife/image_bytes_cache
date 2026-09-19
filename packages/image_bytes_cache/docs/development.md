@@ -68,7 +68,14 @@ lib/
   src/
     image_bytes_cache.dart        # brain + facade + Memory/NoOp
     image_bytes_resolver.dart
-    http_bytes_fetcher.dart
+    http/                         # fetcher + request/response/exception/middleware grammar
+      http_bytes_fetcher.dart
+      middlewares/
+        timeout_middleware.dart
+        retry_middleware.dart
+        bearer_middleware.dart
+        logger_middleware.dart
+      retry_backoff.dart
     image_bytes_diagnostics.dart
     image_bytes_index_document.dart
     image_bytes_web_keys.dart
