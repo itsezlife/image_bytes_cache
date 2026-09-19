@@ -10,7 +10,7 @@ library;
 import 'dart:js_interop';
 import 'dart:typed_data';
 
-import 'package:image_bytes_cache/src/environment_specific/image_bytes_blob_store_routed_js.dart';
+import 'package:image_bytes_cache/src/environment_specific/blob_store_routed_js.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 import 'package:image_bytes_cache/src/image_bytes_web_keys.dart';
 import 'package:test/test.dart';

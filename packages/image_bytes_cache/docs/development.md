@@ -74,9 +74,9 @@ lib/
     image_bytes_web_keys.dart
     isolate_controller.dart       # VM worker lifecycle (not exported)
     environment_specific/
-      image_bytes_cache_open.dart     # conditional stub
-      image_bytes_cache_open_vm.dart
-      image_bytes_cache_open_js.dart
+      cache_open.dart     # conditional stub
+      cache_open_vm.dart
+      cache_open_js.dart
       *_file_vm.dart / *_js.dart      # index + blob adapters
 benchmark/
   compare.dart                    # warmup / calibrate / baseline deltas

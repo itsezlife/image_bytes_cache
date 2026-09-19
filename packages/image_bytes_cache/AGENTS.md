@@ -40,7 +40,7 @@ More: [`docs/development.md`](docs/development.md).
 | `image_bytes_index_document.dart` | Versioned index JSON codec (`v:1`) | [storage](docs/storage.md) |
 | `image_bytes_web_keys.dart` | Synthetic `.invalid` Cache URLs + OPFS dir names | [storage](docs/storage.md) |
 | `isolate_controller.dart` | Long-lived isolate spawn/add/stream/close (VM blob IO) | [storage](docs/storage.md) |
-| `environment_specific/image_bytes_cache_open*.dart` | Conditional `open` (VM files / web Cache+OPFS) | [storage](docs/storage.md) |
+| `environment_specific/cache_open*.dart` | Conditional `open` (VM files / web Cache+OPFS) | [storage](docs/storage.md) |
 | `environment_specific/*_vm.dart` | File index + isolate blob worker | [storage](docs/storage.md) |
 | `environment_specific/*_js.dart` | Cache API index; Cache/OPFS blobs by 64 KiB cut | [storage](docs/storage.md) |
 

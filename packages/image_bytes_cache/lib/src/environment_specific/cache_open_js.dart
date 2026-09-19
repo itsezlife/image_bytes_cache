@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
-import 'package:image_bytes_cache/src/environment_specific/image_bytes_blob_store_routed_js.dart';
-import 'package:image_bytes_cache/src/environment_specific/image_bytes_index_cache_js.dart';
+import 'package:image_bytes_cache/src/environment_specific/blob_store_routed_js.dart';
+import 'package:image_bytes_cache/src/environment_specific/index_cache_js.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 
 /// Conditional-import hook: Cache API index + Cache/OPFS blobs by size.

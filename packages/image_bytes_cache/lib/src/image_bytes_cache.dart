@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
-import 'package:image_bytes_cache/src/environment_specific/image_bytes_cache_open.dart' as environment_specific;
+import 'package:image_bytes_cache/src/environment_specific/cache_open.dart' as environment_specific;
 import 'package:image_bytes_cache/src/image_bytes_diagnostics.dart';
 import 'package:meta/meta.dart';
 

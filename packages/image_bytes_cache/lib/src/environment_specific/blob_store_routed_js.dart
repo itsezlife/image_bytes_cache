@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
-import 'package:image_bytes_cache/src/environment_specific/image_bytes_blob_store_cache_js.dart';
-import 'package:image_bytes_cache/src/environment_specific/image_bytes_blob_store_opfs_js.dart';
+import 'package:image_bytes_cache/src/environment_specific/blob_store_cache_js.dart';
+import 'package:image_bytes_cache/src/environment_specific/blob_store_opfs_js.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 
 /// Web payload half of [IndexedImageBytesCache]: Cache API + OPFS by size.

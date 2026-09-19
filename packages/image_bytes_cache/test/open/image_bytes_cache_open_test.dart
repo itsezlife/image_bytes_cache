@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:image_bytes_cache/src/environment_specific/image_bytes_blob_store_file_vm.dart';
+import 'package:image_bytes_cache/src/environment_specific/blob_store_file_vm.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 import 'package:image_bytes_cache/src/image_bytes_diagnostics.dart';
 import 'package:path/path.dart' as p;
