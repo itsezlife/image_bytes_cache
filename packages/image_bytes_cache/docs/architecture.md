@@ -92,7 +92,7 @@ Everything public is re-exported from `lib/image_bytes_cache.dart`:
 | --- | --- |
 | `image_bytes_cache.dart` | Keys, retention, records, index/blob ports, `IImageBytesCache`, `IndexedImageBytesCache`, Memory/NoOp, `ImageBytesCache` facade |
 | `image_bytes_resolver.dart` | `ImageBytesRequest`, `IImageBytesResolver`, `ImageBytesResolver` |
-| `http_bytes_fetcher.dart` | Network GET with pool and coalesce |
+| `http/http_bytes_fetcher.dart` (+ `http/middlewares/`) | Network GET: middleware chain, typed `$` errors, pool, coalesce |
 | `image_bytes_diagnostics.dart` | Soft-failure policy and events |
 
 Deliberately **not** barrel-public (import via `src/` only when writing adapters
@@ -119,6 +119,6 @@ in a host UI util tree and not in this core.
 | Web Cache API / OPFS routing | `environment_specific/*_js.dart` | [storage](storage.md) |
 | Index wire format | `image_bytes_index_document.dart` | [storage](storage.md) |
 | Resolve / write-through / empty miss | `ImageBytesResolver` | [resolve-ladder](resolve-ladder.md) |
-| Pool / coalesce / timeout | `HttpBytesFetcher` | [resolve-ladder](resolve-ladder.md) |
+| Pool / coalesce / Timeout middleware / typed HTTP errors | `HttpBytesFetcher` + `http/` | [resolve-ladder](resolve-ladder.md) |
 | Open degrade / configure close | `ImageBytesCache` | [resolve-ladder](resolve-ladder.md) |
 | Commands, tests, seams | (tests / tooling) | [development](development.md) |
