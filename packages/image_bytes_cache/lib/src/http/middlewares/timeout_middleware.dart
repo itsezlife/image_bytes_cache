@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:cancel_token/cancel_token.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_bytes_cache/src/http/http_bytes_fetcher.dart';
 import 'package:meta/meta.dart';
@@ -16,9 +15,7 @@ import 'package:meta/meta.dart';
 /// timeout, not cancellation, because we stopped awaiting or errored the stream.
 ///
 /// Defaults are 15 seconds each. Per-request overrides via
-/// [HttpBytesContextKeys.connectTimeout] / [HttpBytesContextKeys.receiveTimeout]
-/// (legacy [HttpBytesContextKeys.timeout] / [HttpBytesContextKeys.duration] alias
-/// connect).
+/// [HttpBytesContext.connectTimeout] / [HttpBytesContext.receiveTimeout].
 /// {@endtemplate}
 @immutable
 class HttpBytesTimeoutMiddleware {
@@ -31,11 +28,11 @@ class HttpBytesTimeoutMiddleware {
   });
 
   /// Time allowed to receive the response headers. Overridable per request via
-  /// [HttpBytesContextKeys.connectTimeout] (or legacy `'timeout'`/`'duration'`).
+  /// [HttpBytesContext.connectTimeout].
   final Duration connectTimeout;
 
   /// Max idle gap allowed between response-body chunks. Overridable per request via
-  /// [HttpBytesContextKeys.receiveTimeout].
+  /// [HttpBytesContext.receiveTimeout].
   final Duration receiveTimeout;
 
   /// Back-compat alias for [connectTimeout]: when provided it overrides the connect default.
@@ -49,13 +46,11 @@ class HttpBytesTimeoutMiddleware {
     HttpBytesHandler innerHandler,
   ) => (request, context) async {
     final connect = _resolve(
-      context[HttpBytesContextKeys.connectTimeout] ??
-          context[HttpBytesContextKeys.timeout] ??
-          context[HttpBytesContextKeys.duration],
+      context.connectTimeout,
       duration ?? connectTimeout,
     );
     final receive = _resolve(
-      context[HttpBytesContextKeys.receiveTimeout],
+      context.receiveTimeout,
       receiveTimeout,
     );
 
@@ -70,9 +65,7 @@ class HttpBytesTimeoutMiddleware {
       } on TimeoutException catch (e, s) {
         // Abort the underlying socket so it stops consuming bandwidth —
         // `.timeout()` alone only stops awaiting.
-        if (context[HttpBytesContextKeys.cancelToken] case final CancelToken token) {
-          token.cancel(e);
-        }
+        context.cancelToken?.cancel(e);
         onTimeout?.call(connect);
         Error.throwWithStackTrace(
           HttpBytesException$Timeout(
@@ -95,9 +88,7 @@ class HttpBytesTimeoutMiddleware {
     final wrapped = response.stream.timeout(
       receive,
       onTimeout: (sink) {
-        if (context[HttpBytesContextKeys.cancelToken] case final CancelToken token) {
-          token.cancel();
-        }
+        context.cancelToken?.cancel();
         onTimeout?.call(receive);
         sink.addError(
           HttpBytesException$Timeout(
@@ -122,38 +113,4 @@ class HttpBytesTimeoutMiddleware {
     Duration() || int() || DateTime() => null, // explicit zero/past ⇒ disabled
     _ => fallback,
   };
-}
-
-/// {@template http_bytes_exception_timeout}
-/// Client timeout exception — thrown when a connect or receive timeout fires.
-/// {@endtemplate}
-final class HttpBytesException$Timeout extends HttpBytesException implements TimeoutException {
-  /// {@macro http_bytes_exception_timeout}
-  const HttpBytesException$Timeout({
-    required this.code,
-    required this.message,
-    required this.statusCode,
-    required this.duration,
-    this.error,
-    this.data,
-  });
-
-  @override
-  final String code;
-
-  @override
-  final String message;
-
-  @override
-  final int statusCode;
-
-  @override
-  final Object? error;
-
-  @override
-  final Object? data;
-
-  /// The duration that was exceeded.
-  @override
-  final Duration? duration;
 }

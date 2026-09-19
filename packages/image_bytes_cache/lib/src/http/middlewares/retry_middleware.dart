@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
 import 'package:image_bytes_cache/src/http/http_bytes_fetcher.dart';
-import 'package:image_bytes_cache/src/http/middlewares/timeout_middleware.dart';
 import 'package:image_bytes_cache/src/http/retry_backoff.dart';
 import 'package:meta/meta.dart';
 
@@ -25,12 +24,13 @@ const _kMaxRetryAfter = Duration(seconds: 60);
 /// The HTTP-date form is intentionally not parsed: rare in
 /// practice; callers fall back to full-jitter backoff.
 Duration? _retryAfter(Object error) {
-  if (error is! HttpBytesException) return null;
-  if (error.data case <String, Object?>{'retry-after': final String ra}) {
-    final seconds = int.tryParse(ra.trim());
-    if (seconds != null && seconds >= 0) {
-      final d = Duration(seconds: seconds);
-      return d > _kMaxRetryAfter ? _kMaxRetryAfter : d;
+  if (error case HttpBytesException(:final data)) {
+    if (data case <String, Object?>{'retry-after': final String ra}) {
+      final seconds = int.tryParse(ra.trim());
+      if (seconds != null && seconds >= 0) {
+        final d = Duration(seconds: seconds);
+        return d > _kMaxRetryAfter ? _kMaxRetryAfter : d;
+      }
     }
   }
   return null;
@@ -102,16 +102,10 @@ class HttpBytesRetryMiddleware {
   HttpBytesHandler call(
     HttpBytesHandler innerHandler,
   ) => (request, context) async {
-    final retries = switch (context[HttpBytesContextKeys.retries]) {
-      final int r when r > 0 => r,
-      _ => backoff.maxRetries,
-    };
-    final idempotent =
-        _kIdempotentMethods.contains(request.method.toUpperCase()) ||
-        context[HttpBytesContextKeys.retryNonIdempotent] == true;
+    final retries = context.retries ?? backoff.maxRetries;
+    final idempotent = _kIdempotentMethods.contains(request.method.toUpperCase()) || context.retryNonIdempotent;
 
-    final shouldNotRetry =
-        context[HttpBytesContextKeys.noRetry] == true || retries < 1 || !idempotent || !request.canBeRetried;
+    final shouldNotRetry = context.noRetry || retries < 1 || !idempotent || !request.canBeRetried;
     if (shouldNotRetry) return innerHandler(request, context);
 
     final evaluate = retryEvaluator ?? defaultRetryEvaluator;
@@ -121,8 +115,11 @@ class HttpBytesRetryMiddleware {
     while (true) {
       try {
         return await innerHandler(clonedRequest, context);
-      } catch (e) {
-        final mechanicForbidsRetry = e is HttpBytesException$Cancelled || e is HttpBytesException$Timeout;
+      } on Object catch (e) {
+        final mechanicForbidsRetry = switch (e) {
+          HttpBytesException$Cancelled() || HttpBytesException$Timeout() => true,
+          _ => false,
+        };
         if (mechanicForbidsRetry || attempt >= retries || !evaluate(e, attempt)) {
           rethrow;
         }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
@@ -146,5 +147,65 @@ void main() {
 
       expect(seen, ['Bearer tok-1', 'Bearer tok-2']);
     });
+
+    test(
+      'different tokens do not coalesce — separate GETs for the same URL',
+      () async {
+        var n = 0;
+        var hits = 0;
+        final release = Completer<void>();
+        final seen = <String?>[];
+        final fetcher = fetcherWith(
+          MockClient((request) async {
+            hits++;
+            seen.add(request.headers['authorization']);
+            await release.future;
+            return http.Response.bytes(Uint8List.fromList([1]), 200);
+          }),
+          getToken: () async {
+            final mine = ++n;
+            return 'tok-$mine';
+          },
+        );
+
+        final url = Uri.parse('https://cdn.test/same');
+        final a = fetcher.getBytes(url);
+        final b = fetcher.getBytes(url);
+        // Let both callers pass Bearer and register flights before release.
+        await Future<void>.delayed(Duration.zero);
+        release.complete();
+        await (a, b).wait;
+
+        expect(hits, 2);
+        expect(seen.toSet(), {'Bearer tok-1', 'Bearer tok-2'});
+      },
+    );
+
+    test(
+      'same token coalesces concurrent callers into one GET',
+      () async {
+        var hits = 0;
+        final release = Completer<void>();
+        final fetcher = fetcherWith(
+          MockClient((_) async {
+            hits++;
+            await release.future;
+            return http.Response.bytes(Uint8List.fromList([9]), 200);
+          }),
+          getToken: () async => 'shared-tok',
+        );
+
+        final url = Uri.parse('https://cdn.test/same');
+        final a = fetcher.getBytes(url);
+        final b = fetcher.getBytes(url);
+        await Future<void>.delayed(Duration.zero);
+        release.complete();
+
+        final results = await (a, b).wait;
+        expect(results.$1, Uint8List.fromList([9]));
+        expect(results.$2, Uint8List.fromList([9]));
+        expect(hits, 1);
+      },
+    );
   });
 }

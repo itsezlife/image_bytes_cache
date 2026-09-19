@@ -122,7 +122,7 @@ void main() {
           HttpBytesRequest(
             http.Request('GET', Uri.parse('https://cdn.test/once')),
           ),
-          context: {HttpBytesContextKeys.noRetry: true},
+          context: HttpBytesContext({HttpBytesContext.noRetryKey: true}),
         ),
         throwsA(isA<HttpBytesException$Server>()),
       );

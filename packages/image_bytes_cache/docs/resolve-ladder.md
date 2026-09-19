@@ -17,10 +17,14 @@ bytes are length-prefixed URL + canonical headers (not a `url|headers` string
 join), so a `|` inside the URL or a header value cannot forge another
 `(url, headers)` pair.
 
-`HttpBytesFetcher` coalesce uses `ImageCacheKey.fromUrl(…).value` as the
-in-flight map key, so coalesce identity and durable identity stay the same
-rules: header casing / map order cannot split one logical download, and
-delimiter collisions cannot merge two.
+`HttpBytesFetcher` in-flight coalesce uses `ImageCacheKey.fromUrl(…).value`
+**after** request-mutating middleware runs, so Bearer-injected `Authorization`
+participates in the coalesce key (different tokens do not share a flight).
+Durable resolve identity remains the request’s `ImageCacheKey` / `cacheKey`
+(caller headers); hosts that vary auth across users should put those headers on
+`ImageBytesRequest` or mint distinct `cacheKey`s. Header casing / map order
+still cannot split one logical download, and delimiter collisions cannot merge
+two.
 
 Distinct URLs that share a basename still produce distinct keys via the
 fingerprint. Values are capped (~180 chars) so they stay safe as filesystem
@@ -81,31 +85,36 @@ GET bodies only. Callers own disk cache and decode.
 | `middlewares` | Timeout only (~15s connect + receive) | `null` → default [HttpBytesTimeoutMiddleware]; `[]` → no Timeout. Connect bounds headers; receive bounds idle body gaps. Opt-in: [HttpBytesRetryMiddleware], [HttpBytesBearerMiddleware], [HttpBytesLoggerMiddleware$Developer] (outermost) |
 
 Middleware list order is outermost first (first entry wraps the rest). Coalesce
-identity is `ImageCacheKey` from the URL + headers assembled in `_sendUnstreamed`
-(request-mutating middleware still affects the wire request). Concurrent calls
-that share that identity share one in-flight GET; each caller still gets its own
+runs **inside** the middleware chain (after request-mutating middleware, before
+`Client.send`), so identity is `ImageCacheKey` from the **post-middleware** URL +
+headers (Bearer-injected `Authorization` participates). Concurrent calls that
+share that identity share one in-flight GET; each caller still gets its own
 `Future` (so per-caller cancel can fail one joiner without aborting the flight).
+Joiners do not hold a pool slot. The starter returns a streaming response so
+Timeout can wrap receive-idle on the body; `_sendUnstreamed` buffers afterward
+and fans the buffer out to joiners.
 
-`send` / `getBytes` only forward into `_sendUnstreamed` (token + `AbortableRequest`
-+ pool/coalesce). `_createHandler` is Client.send-only: status, progress
-`ByteStream.map`, then the middleware chain (Timeout connect/receive).
-Failures surface only as `HttpBytesException` variants (`HttpBytesException$Network`,
-`$Request`, `$Server`, `$Authentication`, `$Timeout`, `$Cancelled`, `$Internal`),
-each with `code` / `statusCode` / `message` / optional `error` / `data`. Non-2xx
-maps by status: 401/403 → `$Authentication`, 5xx → `$Server`, else `$Request`.
-`getBytes` remains a convenience over `send(HttpBytesRequest)` (body via `toBytes`
-/ cached `body`).
+`send` / `getBytes` seed caller context and run the pipeline (user middlewares
+wrap coalesce + `Client.send`). `_createClientSend` is Client.send-only: status,
+progress `ByteStream.map`. Failures surface only as the sealed
+`HttpBytesException` variants (`$Network`, `$Request`, `$Server`,
+`$Authentication`, `$Timeout`, `$Cancelled`, `$Internal`), each with `code` /
+`statusCode` / `message` / optional `error` / `data`. Non-2xx maps by status:
+401/403 → `$Authentication`, 5xx → `$Server`, else `$Request`. `getBytes`
+remains a convenience over `send(HttpBytesRequest)` (body via `toBytes` /
+cached `body`).
 
-Each `send` creates a **flight** [CancelToken] stored in context
-(`HttpBytesContextKeys.cancelToken`) and used as the Abortable GET
-`abortTrigger`. Callers may pass their own token: canceling one coalesced
-subscriber fails only that caller with `$Cancelled` and leaves the shared GET
-running; canceling the **last** subscriber cancels the flight token (socket
-abort). `HttpBytesTimeoutMiddleware` cancels that same flight token and still
-surfaces `$Timeout` (not `$Cancelled`). Connect bounds headers; receive bounds
-idle body gaps. Defaults are 15s each (override via
-`HttpBytesContextKeys.connectTimeout` / `receiveTimeout`, or legacy `timeout` /
-`duration` for connect).
+Each `send` creates a **flight** [CancelToken] on `HttpBytesContext.cancelToken`
+and uses it as the Abortable GET `abortTrigger`. Callers may pass their own
+token: canceling one coalesced subscriber fails only that caller with
+`$Cancelled` and leaves the shared GET running; canceling the **last**
+subscriber cancels the flight token (socket abort). `HttpBytesTimeoutMiddleware`
+cancels that same flight token and still surfaces `$Timeout` (not `$Cancelled`).
+Connect bounds headers; receive bounds idle body gaps. Defaults are 15s each
+(override via `HttpBytesContext.connectTimeout` / `receiveTimeout`).
+
+Middleware chains merge with `HttpBytesMiddlewareWrapper.merge` (outermost
+first). Ad-hoc hooks use `HttpBytesMiddlewareWrapper(onRequest: …)`.
 
 `HttpBytesRetryMiddleware` (opt-in) retries idempotent GETs on transient failures
 (`$Network` / 408 / 425 / 429 / selected 5xx), honors delta-seconds `Retry-After`,
