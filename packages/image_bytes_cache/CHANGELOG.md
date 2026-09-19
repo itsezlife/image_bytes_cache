@@ -1,34 +1,27 @@
 ## Unreleased
 
-- **ADDED**: HTTP middleware chain on `HttpBytesFetcher` under `src/http/`.
-  Handlers compose as `Middleware = Handler Function(Handler)` (outermost first).
-  Default list is Timeout only (`null` installs it; `[]` installs none). Opt-in:
-  `HttpBytesRetryMiddleware` (full-jitter backoff, `Retry-After`),
-  `HttpBytesBearerMiddleware` (attach-only `Authorization`, no logout/refresh),
-  and `HttpBytesLoggerMiddleware$Developer` (`developer.log`, no bodies/headers).
-  Public barrel re-exports these types plus `CancelToken` / `CancelledException`
-  from `cancel_token`.
-- **ADDED**: Typed `HttpBytesException` **sealed** tree as the only public HTTP
-  failure surface (`$Network`, `$Request`, `$Server`, `$Authentication`,
-  `$Timeout`, `$Cancelled`, `$Internal`). Non-2xx maps by status (401/403 → auth,
-  5xx → server, else request). Transport failures without a response are
-  `$Network`. Hosts that caught `ClientException` / raw `SocketException` /
-  `TimeoutException` need to switch.
-- **ADDED**: Coalesce-aware cancel. Concurrent same-identity callers share one
-  GET via a flight `CancelToken` (abort trigger + Timeout context). Canceling
-  one subscriber fails only that caller with `$Cancelled`; canceling the last
-  aborts the socket. Timeout still surfaces `$Timeout`, not `$Cancelled`.
-  `CancelToken.link` is not used here (parent→child is the wrong direction).
-- **ADDED**: `HttpBytesContext` extension type — typed slots (`cancelToken`,
-  `connectTimeout`, `noRetry`, …) over the per-send map. Replaces
-  `HttpBytesContextKeys`. Merge chains with
-  `HttpBytesMiddlewareWrapper.merge` (outermost first).
-- **CHANGED**: `HttpBytesFetcher` lives at `src/http/http_bytes_fetcher.dart`.
-  Timeout is middleware (connect + receive idle), not a fetcher field. Pool wait
-  before a slot stays unbounded. Coalesce identity is the **post-middleware**
-  `ImageCacheKey` (URL + headers after Bearer and other request mutators), so
-  injected `Authorization` participates in in-flight coalesce. Legacy context
-  aliases `timeout` / `duration` are removed (use `connectTimeout`).
+- **ADDED**: HTTP middleware on `HttpBytesFetcher` (`src/http/`). List order is
+  outermost first. `null` middlewares installs Timeout only; `[]` installs none.
+  Opt-in: `HttpBytesRetryMiddleware` (full-jitter backoff, honors `Retry-After`),
+  `HttpBytesBearerMiddleware` (sets `Authorization` from `getToken`, no logout
+  or refresh), `HttpBytesLoggerMiddleware$Developer` (`developer.log`, no
+  bodies or headers). Barrel also exports `CancelToken` / `CancelledException`.
+- **ADDED**: Sealed `HttpBytesException` variants: `$Network`, `$Request`,
+  `$Server`, `$Authentication`, `$Timeout`, `$Cancelled`, `$Internal`. Non-2xx
+  maps by status (401/403 → auth, 5xx → server, else request). No HTTP response
+  is `$Network`. Catch these instead of `ClientException`, `SocketException`,
+  or raw `TimeoutException`.
+- **ADDED**: Coalesce-aware cancel. Same-identity callers share one GET.
+  Canceling one leaves the others running; canceling the last aborts the
+  socket. Timeout still throws `$Timeout`, not `$Cancelled`.
+- **ADDED**: `HttpBytesContext` for per-send overrides (`connectTimeout`,
+  `receiveTimeout`, `noRetry`, `retries`, and so on).
+- **CHANGED**: Fetcher file moved to `src/http/http_bytes_fetcher.dart`.
+  Connect and receive idle timeouts are middleware, not fetcher fields. Waiting
+  for a pool slot is still unbounded. In-flight coalesce uses the
+  post-middleware `ImageCacheKey`, so Bearer-injected `Authorization` keeps
+  different tokens from sharing a flight. Durable resolve keys still follow
+  request headers / `cacheKey`.
 
 ## 0.1.0
 
