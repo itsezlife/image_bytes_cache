@@ -27,6 +27,7 @@ environment:
   sdk: ">=3.11.0"
 
 dependencies:
+  cancel_token: ^0.1.1
   crypto: ^3.0.6
   http: ^1.6.0
   meta: any

@@ -15,7 +15,10 @@
 /// not depend on a product logger.
 library;
 
-export 'src/http_bytes_fetcher.dart';
+export 'package:cancel_token/cancel_token.dart' show CancelToken, CancelledException;
+
+export 'src/http/http_bytes_fetcher.dart';
+export 'src/http/middlewares/timeout_middleware.dart';
 export 'src/image_bytes_cache.dart';
 export 'src/image_bytes_diagnostics.dart';
 export 'src/image_bytes_resolver.dart';
