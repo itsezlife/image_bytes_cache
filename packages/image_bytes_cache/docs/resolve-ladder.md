@@ -78,27 +78,53 @@ GET bodies only. Callers own disk cache and decode.
 | Knob | Default | Notes |
 | --- | --- | --- |
 | `maxConcurrent` | 6 | Further callers wait in `Pool` |
-| `timeout` | 15s | Starts after a pool slot is acquired; wait for a slot is **intentionally unbounded** |
+| `middlewares` | Timeout only (~15s connect + receive) | `null` → default [HttpBytesTimeoutMiddleware]; `[]` → no Timeout. Connect bounds headers; receive bounds idle body gaps. Opt-in: [HttpBytesRetryMiddleware], [HttpBytesBearerMiddleware], [HttpBytesLoggerMiddleware$Developer] (outermost) |
 
-Concurrent calls that share the same `ImageCacheKey` identity (canonical URL +
-canonical headers) share one in-flight `Future`. Non-2xx → `ClientException`.
-Empty body → `StateError` (fail closed; no silent empty paint). After `close`,
-new `getBytes` calls throw; in-flight work may still finish or fail. If the
-fetcher created its own `http.Client`, `close` closes that client.
+Middleware list order is outermost first (first entry wraps the rest). Coalesce
+identity is `ImageCacheKey` from the URL + headers assembled in `_sendUnstreamed`
+(request-mutating middleware still affects the wire request). Concurrent calls
+that share that identity share one in-flight GET; each caller still gets its own
+`Future` (so per-caller cancel can fail one joiner without aborting the flight).
+
+`send` / `getBytes` only forward into `_sendUnstreamed` (token + `AbortableRequest`
++ pool/coalesce). `_createHandler` is Client.send-only: status, progress
+`ByteStream.map`, then the middleware chain (Timeout connect/receive).
+Failures surface only as `HttpBytesException` variants (`HttpBytesException$Network`,
+`$Request`, `$Server`, `$Authentication`, `$Timeout`, `$Cancelled`, `$Internal`),
+each with `code` / `statusCode` / `message` / optional `error` / `data`. Non-2xx
+maps by status: 401/403 → `$Authentication`, 5xx → `$Server`, else `$Request`.
+`getBytes` remains a convenience over `send(HttpBytesRequest)` (body via `toBytes`
+/ cached `body`).
+
+Each `send` creates a **flight** [CancelToken] stored in context
+(`HttpBytesContextKeys.cancelToken`) and used as the Abortable GET
+`abortTrigger`. Callers may pass their own token: canceling one coalesced
+subscriber fails only that caller with `$Cancelled` and leaves the shared GET
+running; canceling the **last** subscriber cancels the flight token (socket
+abort). `HttpBytesTimeoutMiddleware` cancels that same flight token and still
+surfaces `$Timeout` (not `$Cancelled`). Connect bounds headers; receive bounds
+idle body gaps. Defaults are 15s each (override via
+`HttpBytesContextKeys.connectTimeout` / `receiveTimeout`, or legacy `timeout` /
+`duration` for connect).
+
+`HttpBytesRetryMiddleware` (opt-in) retries idempotent GETs on transient failures
+(`$Network` / 408 / 425 / 429 / selected 5xx), honors delta-seconds `Retry-After`,
+and never retries `$Timeout` / `$Cancelled` / `$Authentication`. Place it
+**outside** Timeout. `HttpBytesBearerMiddleware` only sets
+`Authorization: Bearer …` from `getToken` — no logout / refresh.
+`HttpBytesLoggerMiddleware$Developer` (opt-in) logs method/URL/outcome/latency
+via `developer.log` (`http_bytes`); place outermost to include retry time.
 
 When `onBytesProgress` is supplied on the caller that **starts** the in-flight
 GET, the fetcher reports cumulative bytes as the response body is read (`total`
 from Content-Length when present). Without a sink, the body is consolidated
-without inventing chunk events. Coalesced joiners share the same `Future`; the
-progress sink does not change coalesce identity.
+without inventing chunk events. Coalesced joiners each get their own Future to
+the same buffered response; the progress sink does not change coalesce identity.
 
-Timeout uses `http.AbortableRequest`: clients that honor `abortTrigger`
-(`IOClient`, browser client) release the underlying connection when the
-deadline elapses. The waiter always sees `TimeoutException`. Clients that do
-not abort (for example `MockClient` in tests) still fail the waiter; any
-leftover in-flight work is then a property of that client. Pool wait before a
-slot is not timed — raise `maxConcurrent` or reduce host concurrency if queue
-latency dominates.
+After `close`, new `send` / `getBytes` calls throw `HttpBytesException$Internal`;
+in-flight work may still finish or fail. If the fetcher created its own
+`http.Client`, `close` closes that client. Pool wait before a slot is not timed
+— raise `maxConcurrent` or reduce host concurrency if queue latency dominates.
 
 ## Diagnostics
 

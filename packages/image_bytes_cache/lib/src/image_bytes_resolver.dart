@@ -3,7 +3,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:image_bytes_cache/src/http_bytes_fetcher.dart';
+import 'package:image_bytes_cache/src/http/http_bytes_fetcher.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 import 'package:image_bytes_cache/src/image_bytes_diagnostics.dart';
 import 'package:meta/meta.dart';

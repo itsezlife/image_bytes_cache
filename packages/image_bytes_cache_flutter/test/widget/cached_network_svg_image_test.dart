@@ -94,7 +94,7 @@ void main() {
       await settle(tester, () => errors.isNotEmpty);
 
       expect(errors, hasLength(1));
-      expect(errors.single, isA<http.ClientException>());
+      expect(errors.single, isA<HttpBytesException$Request>());
       expect(find.text('err'), findsOneWidget);
     });
 
