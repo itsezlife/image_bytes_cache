@@ -107,7 +107,7 @@ jobs:
       - name: 🧪 Chrome open smoke
         timeout-minutes: 10
         run: |
-          dart test -p chrome test/open/image_bytes_cache_open_web_test.dart
+          dart test -p chrome test/open/open_web_test.dart
 
   flutter:
     name: "📱 Flutter adapters"

@@ -115,7 +115,7 @@ assuming first `shared().resolve` permanently binds NoOp
 
 Chrome integration: from the package root,
 
-`dart test -p chrome test/open/image_bytes_cache_open_web_test.dart`
+`dart test -p chrome test/open/open_web_test.dart`
 
 Covers Cache vs OPFS routing by size, close/reopen, and orphan reclaim on both
 backends. CI runs this as a merge gate; also run it locally when iterating on

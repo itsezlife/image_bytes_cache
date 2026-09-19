@@ -250,7 +250,7 @@ dart format lib test
 Web open smoke (run before merging web blob or open changes):
 
 ```bash
-dart test -p chrome test/open/image_bytes_cache_open_web_test.dart
+dart test -p chrome test/open/open_web_test.dart
 ```
 
 Store and ladder microbenches: [Performance](#performance).

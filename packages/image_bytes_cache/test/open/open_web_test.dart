@@ -1,7 +1,7 @@
 // Integration coverage for ImageBytesCache.open on web (Cache API + OPFS).
 //
 // Run with:
-// dart test -p chrome test/open/image_bytes_cache_open_web_test.dart
+// dart test -p chrome test/open/open_web_test.dart
 //
 // Skipped on the VM compiler: package:web / Cache Storage / OPFS are browser-only.
 @TestOn('chrome')

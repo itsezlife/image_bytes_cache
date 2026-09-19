@@ -35,7 +35,7 @@ A clear and concise description of what you expected to happen.
 **Web-related?**
 If this touches web blob storage, Cache API, OPFS, or `ImageBytesCache.open` on web: did you (or CI) run
 
-`dart test -p chrome test/open/image_bytes_cache_open_web_test.dart`
+`dart test -p chrome test/open/open_web_test.dart`
 
 from `packages/image_bytes_cache`?
 
