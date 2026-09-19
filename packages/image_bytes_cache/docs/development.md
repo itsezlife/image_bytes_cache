@@ -1,7 +1,7 @@
 # Development
 
 Commands, test seams, layout, and conventions for package `image_bytes_cache`
-(`0.0.1`). SDK `>=3.11.0`.
+(`0.2.0`). SDK `>=3.11.0`.
 
 Layout: this package sits beside sibling `image_bytes_cache_flutter` under
 `packages/` in this repository. Core stays bytes-only; paint widgets and

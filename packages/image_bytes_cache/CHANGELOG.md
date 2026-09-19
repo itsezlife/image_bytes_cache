@@ -1,5 +1,7 @@
 ## Unreleased
 
+## 0.2.0
+
 - **ADDED**: HTTP middleware on `HttpBytesFetcher` (`src/http/`). List order is
   outermost first. `null` middlewares installs Timeout only; `[]` installs none.
   Opt-in: `HttpBytesRetryMiddleware` (full-jitter backoff, honors `Retry-After`),

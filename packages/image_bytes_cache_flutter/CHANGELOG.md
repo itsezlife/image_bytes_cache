@@ -1,3 +1,11 @@
+## Unreleased
+
+## 0.2.0
+
+- **CHANGED**: Paint adapters surface sealed `HttpBytesException` from core
+  on network miss failures. Catch `$Network` / `$Request` / `$Timeout` / … instead
+  of `ClientException` or raw socket errors when handling `onError`.
+
 ## 0.1.0
 
 - **ADDED**: Raster paint adapters:
