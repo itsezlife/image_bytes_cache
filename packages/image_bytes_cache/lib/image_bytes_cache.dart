@@ -18,10 +18,10 @@ library;
 export 'package:cancel_token/cancel_token.dart' show CancelToken, CancelledException;
 
 export 'src/http/http_bytes_fetcher.dart';
-export 'src/http/middlewares/timeout_middleware.dart';
 export 'src/http/middlewares/bearer_middleware.dart';
 export 'src/http/middlewares/logger_middleware.dart';
 export 'src/http/middlewares/retry_middleware.dart';
+export 'src/http/middlewares/timeout_middleware.dart';
 export 'src/http/retry_backoff.dart';
 export 'src/image_bytes_cache.dart';
 export 'src/image_bytes_diagnostics.dart';
