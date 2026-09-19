@@ -47,6 +47,5 @@ final class HttpBytesRetryBackoff {
   }
 
   /// Whether sleeping [delay] after [elapsed] still fits [maxElapsed].
-  bool withinBudget(Duration elapsed, Duration delay) =>
-      elapsed + delay <= maxElapsed;
+  bool withinBudget(Duration elapsed, Duration delay) => elapsed + delay <= maxElapsed;
 }

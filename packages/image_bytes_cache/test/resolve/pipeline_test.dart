@@ -51,9 +51,7 @@ void main() {
       final fetcher = buildFetcher(
         client: MockClient((_) async {
           attempts++;
-          return attempts == 1
-              ? http.Response('busy', 503)
-              : http.Response.bytes(Uint8List.fromList([1]), 200);
+          return attempts == 1 ? http.Response('busy', 503) : http.Response.bytes(Uint8List.fromList([1]), 200);
         }),
       );
 
@@ -100,9 +98,7 @@ void main() {
       final fetcher = buildFetcher(
         client: MockClient((_) async {
           attempts++;
-          return attempts == 1
-              ? http.Response('missing', 404)
-              : http.Response.bytes(Uint8List.fromList([1]), 200);
+          return attempts == 1 ? http.Response('missing', 404) : http.Response.bytes(Uint8List.fromList([1]), 200);
         }),
         retryEvaluator: (_, _) => true,
       );
@@ -484,9 +480,7 @@ void main() {
         client: MockClient((request) async {
           attempts++;
           seenAuth = request.headers['authorization'];
-          return attempts == 1
-              ? http.Response('busy', 503)
-              : http.Response.bytes(Uint8List.fromList([3]), 200);
+          return attempts == 1 ? http.Response('busy', 503) : http.Response.bytes(Uint8List.fromList([3]), 200);
         }),
       );
 
