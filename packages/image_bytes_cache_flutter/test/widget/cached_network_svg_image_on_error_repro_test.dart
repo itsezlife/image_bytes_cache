@@ -12,15 +12,15 @@ import 'package:image_bytes_cache_flutter/image_bytes_cache_flutter.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  HttpBytesFetcher? fetcher;
+  HttpBytesClient? client;
 
   tearDown(() async {
-    if (fetcher case final active?) {
+    if (client case final active?) {
       await active.close();
-      fetcher = null;
+      client = null;
     }
     ImageBytesResolver.debugShared = null;
-    HttpBytesFetcher.debugShared = null;
+    HttpBytesClient.debugShared = null;
     await ImageBytesCache.resetShared();
   });
 
@@ -62,14 +62,14 @@ void main() {
   testWidgets(
     'onError is invoked when download fails (user symptom)',
     (tester) async {
-      fetcher = HttpBytesFetcher(
+      client = HttpBytesClient(
         client: MockClient(
           (_) async => throw const SocketException('connection failed'),
         ),
       );
       ImageBytesResolver.debugShared = ImageBytesResolver(
         cache: const NoOpImageBytesCache(),
-        fetcher: fetcher!,
+        client: client!,
       );
 
       Object? capturedError;
@@ -115,14 +115,14 @@ void main() {
   testWidgets(
     'onError is invoked when HTTP returns non-OK status',
     (tester) async {
-      fetcher = HttpBytesFetcher(
+      client = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response('', 404),
         ),
       );
       ImageBytesResolver.debugShared = ImageBytesResolver(
         cache: const NoOpImageBytesCache(),
-        fetcher: fetcher!,
+        client: client!,
       );
 
       final onErrorCalled = Completer<void>();

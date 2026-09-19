@@ -13,22 +13,22 @@ void main() {
 
   group('CachedNetworkSvgImage', () {
     late _RecordingClient httpClient;
-    late HttpBytesFetcher fetcher;
+    late HttpBytesClient client;
     late MemoryImageBytesCache cache;
     late ImageBytesResolver resolver;
 
     setUp(() {
       httpClient = _RecordingClient();
-      fetcher = HttpBytesFetcher(client: httpClient);
+      client = HttpBytesClient(client: httpClient);
       cache = MemoryImageBytesCache();
-      resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+      resolver = ImageBytesResolver(cache: cache, client: client);
       ImageBytesResolver.debugShared = resolver;
     });
 
     tearDown(() async {
-      await fetcher.close();
+      await client.close();
       ImageBytesResolver.debugShared = null;
-      HttpBytesFetcher.debugShared = null;
+      HttpBytesClient.debugShared = null;
       await ImageBytesCache.resetShared();
     });
 

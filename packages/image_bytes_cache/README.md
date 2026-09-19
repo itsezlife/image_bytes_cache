@@ -63,7 +63,7 @@ await ImageBytesCache.configure(
 
 // Optional: process-wide HTTP client (Cronet / Cupertino / shared IOClient).
 // Omit to use the default `http.Client()`.
-// await HttpBytesFetcher.configure(HttpBytesFetcher(client: myClient));
+// await HttpBytesClient.configure(HttpBytesClient(client: myClient));
 ```
 
 ### Resolve bytes
@@ -78,7 +78,7 @@ final bytes = await ImageBytesResolver.shared().resolve(
 
 For Flutter paint, use
 [`image_bytes_cache_flutter`](../image_bytes_cache_flutter/) after the same
-`open` / `configure` call (and optional fetcher configure).
+`open` / `configure` call (and optional client configure).
 
 ## Resolve ladder
 
@@ -89,7 +89,7 @@ ImageBytesRequest
 ImageBytesResolver
    ├─ cache.read(key)     hit → return bytes
    ├─ empty payload       treat as miss
-   ├─ HttpBytesFetcher    pool + coalesce by ImageCacheKey identity
+   ├─ HttpBytesClient    pool + coalesce by ImageCacheKey identity
    └─ unawaited write     failure → diagnostics only
 ```
 
@@ -98,12 +98,12 @@ ImageBytesResolver
 | `ImageCacheKey` | Filename-safe identity; shared with HTTP coalesce |
 | `IImageBytesCache` | `read` / `write` / `evict` / `prune` / `close` |
 | `ImageBytesResolver` | Ladder above the store |
-| `HttpBytesFetcher` | GET only; pool 6; timeout 15s after a slot (`AbortableRequest`); pool wait unbounded |
+| `HttpBytesClient` | GET only; pool 6; timeout 15s after a slot (`AbortableRequest`); pool wait unbounded |
 | `ImageBytesDiagnostics` | Soft failures: write-through, index wipe, degraded open |
 
-Inject cache and fetcher in tests. Production code usually uses
+Inject cache and client in tests. Production code usually uses
 `ImageBytesResolver.shared()`, which re-reads `ImageBytesCache.shared()` and
-`HttpBytesFetcher.shared()` on every resolve (not a one-shot snapshot at first
+`HttpBytesClient.shared()` on every resolve (not a one-shot snapshot at first
 call).
 
 ## Retention

@@ -11,7 +11,7 @@ import 'package:meta/meta.dart';
 ///
 /// Filename-safe string: host + last path segment + a short fingerprint of the
 /// [Uri.base.resolve] canonical URL and canonical headers (length-prefixed
-/// material — not a `url|headers` join). Shared with [HttpBytesFetcher]
+/// material — not a `url|headers` join). Shared with [HttpBytesClient]
 /// coalesce via [value]. Without the fingerprint, two URLs that share a
 /// basename would collide on disk.
 @immutable
@@ -27,7 +27,7 @@ final class ImageCacheKey {
   ///
   /// Header keys are lowercased and sorted before hashing so casing and map
   /// iteration order do not change identity (parity with
-  /// [HttpBytesFetcher] coalesce). Values stay as given. Fingerprint material
+  /// [HttpBytesClient] coalesce). Values stay as given. Fingerprint material
   /// is a length-prefixed encoding of URL + canonical headers so a `|` (or any
   /// other character) inside the URL or a header value cannot forge another
   /// (url, headers) pair.
@@ -76,7 +76,7 @@ final class ImageCacheKey {
 
   /// Lowercase keys, last-wins on case duplicates, then sorted `k=v` join.
   ///
-  /// Shared with [HttpBytesFetcher] coalesce so header casing and map order
+  /// Shared with [HttpBytesClient] coalesce so header casing and map order
   /// cannot split cache identity from in-flight GET dedupe.
   static String canonicalHeaders(Map<String, String>? headers) {
     if (headers == null || headers.isEmpty) return '';
@@ -395,7 +395,7 @@ abstract interface class IImageBytesCache {
   /// [MemoryImageBytesCache] and [NoOpImageBytesCache] stay usable after close
   /// so tearDown can call this uniformly. [IndexedImageBytesCache] and durable
   /// compositions reject later ops with [StateError] (same idea as
-  /// [HttpBytesFetcher.close]).
+  /// [HttpBytesClient.close]).
   Future<void> close();
 }
 
@@ -1086,7 +1086,7 @@ abstract final class ImageBytesCache {
   /// [debugShared], and resets diagnostics to silent.
   ///
   /// Also invokes registered ladder cleanup hooks (see
-  /// [addAfterResetShared]) so resolver / fetcher shared wiring can clear
+  /// [addAfterResetShared]) so resolver / client shared wiring can clear
   /// without this facade importing those libraries.
   @visibleForTesting
   static Future<void> resetShared() async {
@@ -1102,7 +1102,7 @@ abstract final class ImageBytesCache {
 
   static final List<FutureOr<void> Function()> _afterResetSharedHooks = [];
 
-  /// Registers cleanup after [resetShared] (resolver memo, fetcher shared, …).
+  /// Registers cleanup after [resetShared] (resolver memo, client shared, …).
   ///
   /// Hooks are package-internal so the store facade does not import the ladder
   /// above it. Idempotent registration is the caller's responsibility.

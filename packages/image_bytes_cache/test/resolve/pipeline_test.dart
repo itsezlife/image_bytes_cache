@@ -7,7 +7,7 @@ import 'package:http/testing.dart';
 import 'package:image_bytes_cache/image_bytes_cache.dart';
 import 'package:test/test.dart';
 
-/// End-to-end coverage for the real [HttpBytesFetcher] + middleware pipeline
+/// End-to-end coverage for the real [HttpBytesClient] + middleware pipeline
 /// (Retry → Timeout → http) over a [MockClient], mirroring api_client's
 /// `http_pipeline_test.dart` for the image-GET surface.
 void main() {
@@ -17,7 +17,7 @@ void main() {
     maxDelay: Duration(milliseconds: 1),
   );
 
-  HttpBytesFetcher buildFetcher({
+  HttpBytesClient buildFetcher({
     required http.Client client,
     bool Function(Object error, int attempt)? retryEvaluator,
     Duration connectTimeout = const Duration(seconds: 5),
@@ -25,7 +25,7 @@ void main() {
     bool Function(int statusCode)? validateStatus,
     List<HttpBytesMiddleware>? extraOuter,
   }) {
-    final fetcher = HttpBytesFetcher(
+    final fetcher = HttpBytesClient(
       client: client,
       validateStatus: validateStatus,
       middlewares: <HttpBytesMiddleware>[
@@ -155,7 +155,7 @@ void main() {
 
     test('the total budget (maxElapsed) stops retries early', () async {
       var attempts = 0;
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient((_) async {
           attempts++;
           await Future<void>.delayed(const Duration(milliseconds: 30));
@@ -283,7 +283,7 @@ void main() {
     test('receive timeout fires when the body stalls mid-stream and aborts', () async {
       final body = StreamController<List<int>>();
       var aborted = false;
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient.streaming((request, _) async {
           (request as http.Abortable).abortTrigger?.then((_) => aborted = true).ignore();
           body.add(const [1, 2]);
@@ -501,7 +501,7 @@ void main() {
         };
       };
 
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
         ),
@@ -525,7 +525,7 @@ void main() {
     }
 
     test('429 is Request and carries retry-after', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response('slow', 429, headers: {'retry-after': '5'}),
         ),
@@ -541,7 +541,7 @@ void main() {
     });
 
     test('500 is Server', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient((_) async => http.Response('boom', 500)),
         middlewares: const [],
       );

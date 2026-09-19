@@ -35,7 +35,7 @@ More: [`docs/development.md`](docs/development.md).
 | --- | --- | --- |
 | `image_bytes_cache.dart` | `ImageCacheKey`, retention, ports, `IndexedImageBytesCache`, Memory/NoOp, `ImageBytesCache` open/configure | [architecture](docs/architecture.md), [storage](docs/storage.md) |
 | `image_bytes_resolver.dart` | Ladder: cache → fetch → write-through | [resolve-ladder](docs/resolve-ladder.md) |
-| `http/http_bytes_fetcher.dart` | HTTP GET types, middleware chain, fetcher | [resolve-ladder](docs/resolve-ladder.md) |
+| `http/http_bytes_client.dart` | HTTP GET types, middleware chain, client | [resolve-ladder](docs/resolve-ladder.md) |
 | `http/middlewares/` | HTTP middlewares (`Timeout`, opt-in `Retry`, `Bearer`, `Logger$Developer`) | [resolve-ladder](docs/resolve-ladder.md) |
 | `image_bytes_diagnostics.dart` | Soft-failure policy (`silent` / `developer` / `onEvent`) | [resolve-ladder](docs/resolve-ladder.md) |
 | `image_bytes_index_document.dart` | Versioned index JSON codec (`v:1`) | [storage](docs/storage.md) |
@@ -95,8 +95,8 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
   `throwOnOpenFailure`; partial VM worker / web handles are closed before
   degrade or rethrow. Missing VM `directory` still throws. `configure`
   closes the previous shared instance before assign. `ImageBytesResolver.shared`
-  re-reads process-wide cache/fetcher on each resolve (no one-shot snapshot).
-  `resetShared` also clears resolver and fetcher shared wiring.
+  re-reads process-wide cache/client on each resolve (no one-shot snapshot).
+  `resetShared` also clears resolver and client shared wiring.
 - **Retention:** TTL on read; capacity on write/prune; no background timer.
   `standard` = 14 days / 500 entries / 50 MiB. Non-positive `maxEntries` /
   `maxBytes` assert.
@@ -116,7 +116,7 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
   Indexed and durable wrappers throw after close.
 - Web payload Cache keys are synthetic `https://image-bytes.invalid/...`, not
   the real fetch URL.
-- `HttpBytesFetcher` Timeout middleware (connect + receive) does not cover pool
+- `HttpBytesClient` Timeout middleware (connect + receive) does not cover pool
   wait time (intentionally unbounded queue). AbortableRequest uses a shared
   **flight** `CancelToken.whenCancel` after a slot is acquired; per-caller tokens
   cancel only that subscriber until the last one aborts the flight. Per-send
@@ -128,7 +128,7 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
 
 - [`docs/architecture.md`](docs/architecture.md): layers, data flow, public API, engine vs flutter adapters.
 - [`docs/storage.md`](docs/storage.md): brain concurrency, retention, VM/web backends, index wipe.
-- [`docs/resolve-ladder.md`](docs/resolve-ladder.md): key, resolver, fetcher, diagnostics, open/configure.
+- [`docs/resolve-ladder.md`](docs/resolve-ladder.md): key, resolver, client, diagnostics, open/configure.
 - [`docs/development.md`](docs/development.md): commands, seams, layout, store + ladder microbenches.
 - [`CONTEXT.md`](CONTEXT.md): ubiquitous language glossary.
 - [`CHANGELOG.md`](CHANGELOG.md): version history (`version:` in pubspec must match a `##` heading).

@@ -3,7 +3,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:image_bytes_cache/src/http/http_bytes_fetcher.dart';
+import 'package:image_bytes_cache/src/http/http_bytes_client.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 import 'package:image_bytes_cache/src/image_bytes_diagnostics.dart';
 import 'package:meta/meta.dart';
@@ -45,7 +45,7 @@ final class ImageBytesRequest {
 
   /// Optional sink for honest HTTP body progress on a network miss.
   ///
-  /// Forwarded to [HttpBytesFetcher.getBytes] only when the ladder actually
+  /// Forwarded to [HttpBytesClient.getBytes] only when the ladder actually
   /// fetches. A durable non-empty cache hit returns bytes without invoking this
   /// callback — hosts must not treat silence as "0%" or invent mid-download
   /// percents. Resolve remains a single [Future] of the full body; this is not
@@ -68,7 +68,7 @@ abstract interface class IImageBytesResolver {
   Future<Uint8List> resolve(ImageBytesRequest request);
 }
 
-/// Default ladder: [IImageBytesCache] then [HttpBytesFetcher].
+/// Default ladder: [IImageBytesCache] then [HttpBytesClient].
 ///
 /// Order: cache read → network on miss → fire-and-forget write-through.
 /// Callers that already hold bytes from a successful GET should keep painting;
@@ -76,8 +76,8 @@ abstract interface class IImageBytesResolver {
 /// by failing [resolve].
 ///
 /// [ImageBytesResolver.shared] does **not** snapshot the process-wide cache or
-/// fetcher. Each [resolve] reads [ImageBytesCache.shared] and
-/// [HttpBytesFetcher.shared] (or their `debugShared` overrides) so configure
+/// client. Each [resolve] reads [ImageBytesCache.shared] and
+/// [HttpBytesClient.shared] (or their `debugShared` overrides) so configure
 /// after first paint still enables durable caching, and [ImageBytesCache.resetShared]
 /// / configure replacement cannot leave this ladder permanently bound to NoOp
 /// or a closed previous store.
@@ -85,22 +85,22 @@ final class ImageBytesResolver implements IImageBytesResolver {
   /// Injected wiring for tests and hosts that own their own ladder instances.
   ImageBytesResolver({
     required IImageBytesCache cache,
-    required HttpBytesFetcher fetcher,
+    required HttpBytesClient client,
     ImageBytesDiagnostics? diagnostics,
   }) : _cacheOf = (() => cache),
-       _fetcherOf = (() => fetcher),
+       _clientOf = (() => client),
        _diagnostics = diagnostics;
 
-  /// Process-wide ladder that re-reads shared cache/fetcher on every resolve.
+  /// Process-wide ladder that re-reads shared cache/client on every resolve.
   ImageBytesResolver._liveShared({ImageBytesDiagnostics? diagnostics})
     : _cacheOf = ImageBytesCache.shared,
-      _fetcherOf = HttpBytesFetcher.shared,
+      _clientOf = HttpBytesClient.shared,
       _diagnostics = diagnostics;
 
   /// Process-wide default when nothing is injected.
   ///
   /// Returns one shared instance, but that instance looks up the current
-  /// [ImageBytesCache.shared] / [HttpBytesFetcher.shared] on each [resolve]
+  /// [ImageBytesCache.shared] / [HttpBytesClient.shared] on each [resolve]
   /// rather than capturing them once at first call.
   factory ImageBytesResolver.shared() {
     _$ensureResetSharedCleanup();
@@ -134,7 +134,7 @@ final class ImageBytesResolver implements IImageBytesResolver {
   }
 
   final IImageBytesCache Function() _cacheOf;
-  final HttpBytesFetcher Function() _fetcherOf;
+  final HttpBytesClient Function() _clientOf;
   final ImageBytesDiagnostics? _diagnostics;
 
   ImageBytesDiagnostics get _effectiveDiagnostics => _diagnostics ?? ImageBytesDiagnostics.current;
@@ -143,14 +143,14 @@ final class ImageBytesResolver implements IImageBytesResolver {
   Future<Uint8List> resolve(ImageBytesRequest request) async {
     final key = request.cacheKey ?? ImageCacheKey.fromUrl(request.url, headers: request.headers);
     final cache = _cacheOf();
-    final fetcher = _fetcherOf();
+    final client = _clientOf();
 
     final cached = await cache.read(key);
     if (cached case final bytes? when bytes.isNotEmpty) {
       return bytes;
     }
 
-    final bytes = await fetcher.getBytes(
+    final bytes = await client.getBytes(
       Uri.base.resolve(request.url),
       headers: request.headers,
       onBytesProgress: request.onBytesProgress,

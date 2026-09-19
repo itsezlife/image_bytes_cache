@@ -1,4 +1,4 @@
-import 'package:image_bytes_cache/src/http/http_bytes_fetcher.dart';
+import 'package:image_bytes_cache/src/http/http_bytes_client.dart';
 import 'package:meta/meta.dart';
 
 /// {@template http_bytes_bearer}

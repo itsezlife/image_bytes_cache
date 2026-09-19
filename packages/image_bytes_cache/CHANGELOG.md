@@ -2,7 +2,10 @@
 
 ## 0.2.0
 
-- **ADDED**: HTTP middleware on `HttpBytesFetcher` (`src/http/`). List order is
+- **BREAKING**: Renamed `HttpBytesFetcher` to `HttpBytesClient` (file
+  `src/http/http_bytes_client.dart`). `ImageBytesResolver` takes `client:`
+  instead of `fetcher:`. Update imports, type names, and named args.
+- **ADDED**: HTTP middleware on `HttpBytesClient` (`src/http/`). List order is
   outermost first. `null` middlewares installs Timeout only; `[]` installs none.
   Opt-in: `HttpBytesRetryMiddleware` (full-jitter backoff, honors `Retry-After`),
   `HttpBytesBearerMiddleware` (sets `Authorization` from `getToken`, no logout
@@ -18,10 +21,9 @@
   socket. Timeout still throws `$Timeout`, not `$Cancelled`.
 - **ADDED**: `HttpBytesContext` for per-send overrides (`connectTimeout`,
   `receiveTimeout`, `noRetry`, `retries`, and so on).
-- **CHANGED**: Fetcher file moved to `src/http/http_bytes_fetcher.dart`.
-  Connect and receive idle timeouts are middleware, not fetcher fields. Waiting
-  for a pool slot is still unbounded. In-flight coalesce uses the
-  post-middleware `ImageCacheKey`, so Bearer-injected `Authorization` keeps
+- **CHANGED**: Connect and receive idle timeouts are middleware, not client
+  fields. Waiting for a pool slot is still unbounded. In-flight coalesce uses
+  the post-middleware `ImageCacheKey`, so Bearer-injected `Authorization` keeps
   different tokens from sharing a flight. Durable resolve keys still follow
   request headers / `cacheKey`.
 

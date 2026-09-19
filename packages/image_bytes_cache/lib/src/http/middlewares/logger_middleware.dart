@@ -1,6 +1,6 @@
 import 'dart:developer' as developer;
 
-import 'package:image_bytes_cache/src/http/http_bytes_fetcher.dart';
+import 'package:image_bytes_cache/src/http/http_bytes_client.dart';
 import 'package:meta/meta.dart';
 
 /// {@template http_bytes_logger_middleware_developer}
@@ -11,7 +11,7 @@ import 'package:meta/meta.dart';
 /// inner chain (including [HttpBytesRetryMiddleware] when stacked inside).
 ///
 /// ```dart
-/// HttpBytesFetcher(
+/// HttpBytesClient(
 ///   middlewares: <HttpBytesMiddleware>[
 ///     const HttpBytesLoggerMiddleware$Developer(), // outermost
 ///     HttpBytesRetryMiddleware(),

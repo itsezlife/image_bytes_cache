@@ -16,7 +16,7 @@ Future<IBytesReadyAdapter> openOursAdapter({
 }) async {
   final root = await Directory.systemTemp.createTemp('ibc_ours_');
   final httpHarness = corpusHttpClient(responseDelay: responseDelay);
-  final fetcher = HttpBytesFetcher(
+  final httpBytesClient = HttpBytesClient(
     client: httpHarness.client,
     maxConcurrent: maxConcurrent,
   );
@@ -24,15 +24,15 @@ Future<IBytesReadyAdapter> openOursAdapter({
     directory: root.path,
     throwOnOpenFailure: true,
   );
-  final resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+  final resolver = ImageBytesResolver(cache: cache, client: httpBytesClient);
   return _OursAdapter(
     id: 'ours',
     label: 'image_bytes_cache',
     root: root,
     cache: cache,
-    fetcher: fetcher,
+    httpBytesClient: httpBytesClient,
     resolver: resolver,
-    client: httpHarness.client,
+    httpClient: httpHarness.client,
   );
 }
 
@@ -61,14 +61,14 @@ final class _OursAdapter implements IBytesReadyAdapter {
     required this.label,
     required Directory root,
     required IImageBytesCache cache,
-    required HttpBytesFetcher fetcher,
+    required HttpBytesClient httpBytesClient,
     required ImageBytesResolver resolver,
-    required http.Client client,
+    required http.Client httpClient,
   }) : _root = root,
        _cache = cache,
-       _fetcher = fetcher,
+       _httpBytesClient = httpBytesClient,
        _resolver = resolver,
-       _client = client;
+       _httpClient = httpClient;
 
   @override
   final String id;
@@ -78,9 +78,9 @@ final class _OursAdapter implements IBytesReadyAdapter {
 
   final Directory _root;
   final IImageBytesCache _cache;
-  final HttpBytesFetcher _fetcher;
+  final HttpBytesClient _httpBytesClient;
   final ImageBytesResolver _resolver;
-  final http.Client _client;
+  final http.Client _httpClient;
   final _seen = <ImageCacheKey>{};
   var _closed = false;
 
@@ -111,9 +111,9 @@ final class _OursAdapter implements IBytesReadyAdapter {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
-    await _fetcher.close();
+    await _httpBytesClient.close();
     await _cache.close();
-    _client.close();
+    _httpClient.close();
     if (_root.existsSync()) {
       await _root.delete(recursive: true);
     }

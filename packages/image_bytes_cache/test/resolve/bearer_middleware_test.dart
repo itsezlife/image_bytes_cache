@@ -10,11 +10,11 @@ import 'package:test/test.dart';
 /// (no logout / refresh). Mirrors api_client's bearer middleware harness for
 /// the image-GET surface.
 void main() {
-  HttpBytesFetcher fetcherWith(
+  HttpBytesClient fetcherWith(
     MockClient client, {
     required Future<String?> Function() getToken,
   }) {
-    final fetcher = HttpBytesFetcher(
+    final fetcher = HttpBytesClient(
       client: client,
       middlewares: <HttpBytesMiddleware>[
         HttpBytesBearerMiddleware(getToken: getToken),

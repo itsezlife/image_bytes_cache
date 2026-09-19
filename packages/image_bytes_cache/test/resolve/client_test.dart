@@ -4,16 +4,16 @@ import 'dart:typed_data';
 import 'package:cancel_token/cancel_token.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:image_bytes_cache/src/http/http_bytes_fetcher.dart';
+import 'package:image_bytes_cache/src/http/http_bytes_client.dart';
 import 'package:image_bytes_cache/src/http/middlewares/timeout_middleware.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('HttpBytesFetcher.getBytes', () {
+  group('HttpBytesClient.getBytes', () {
     test('returns response body bytes on 200', () async {
       final expected = Uint8List.fromList([1, 2, 3, 4]);
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient((request) async {
           expect(request.url, Uri.parse('https://cdn.example.com/a.svg'));
           return http.Response.bytes(expected, 200);
@@ -29,7 +29,7 @@ void main() {
     });
 
     test(r'throws HttpBytesException$Request on 404', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response('gone', 404),
         ),
@@ -48,7 +48,7 @@ void main() {
     });
 
     test(r'throws HttpBytesException$Authentication on 401', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response('auth', 401),
         ),
@@ -68,7 +68,7 @@ void main() {
     });
 
     test(r'throws HttpBytesException$Server on 503', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response(
             'down',
@@ -94,7 +94,7 @@ void main() {
     });
 
     test(r'throws HttpBytesException$Internal on empty body', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List(0), 200),
         ),
@@ -114,7 +114,7 @@ void main() {
     });
 
     test(r'throws HttpBytesException$Network when the client fails without a response', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => throw http.ClientException('socket hung up'),
         ),
@@ -130,7 +130,7 @@ void main() {
     test('coalesces concurrent identical url and headers into one GET', () async {
       var hits = 0;
       final release = Completer<void>();
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient((_) async {
           hits++;
           await release.future;
@@ -160,7 +160,7 @@ void main() {
         final release = Completer<void>();
         final tokenA = CancelToken();
         final tokenB = CancelToken();
-        final fetcher = HttpBytesFetcher(
+        final fetcher = HttpBytesClient(
           middlewares: const [],
           client: _AbortHonoringClient(
             onRequest: (request) {
@@ -207,7 +207,7 @@ void main() {
         final never = Completer<void>();
         final tokenA = CancelToken();
         final tokenB = CancelToken();
-        final fetcher = HttpBytesFetcher(
+        final fetcher = HttpBytesClient(
           middlewares: const [],
           client: _AbortHonoringClient(
             onRequest: (request) {
@@ -255,7 +255,7 @@ void main() {
         };
       }
 
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         middlewares: [injectAuth],
         client: MockClient((request) async {
           seenAuth = request.headers['Authorization'];
@@ -272,7 +272,7 @@ void main() {
       var hits = 0;
       final release = Completer<void>();
       final reports = <(int cumulative, int? total)>[];
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: _GatedChunkedBodyClient(
           release: release,
           onSend: () => hits++,
@@ -304,7 +304,7 @@ void main() {
 
     test('does not coalesce when headers differ', () async {
       var hits = 0;
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient((_) async {
           hits++;
           return http.Response.bytes(Uint8List.fromList([hits]), 200);
@@ -324,7 +324,7 @@ void main() {
     test('does not coalesce URL-with-|… into clean URL plus those headers', () async {
       var hits = 0;
       final release = Completer<void>();
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient((_) async {
           hits++;
           await release.future;
@@ -348,7 +348,7 @@ void main() {
       var inFlight = 0;
       var peak = 0;
       final release = Completer<void>();
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         maxConcurrent: 2,
         client: MockClient((_) async {
           inFlight++;
@@ -374,7 +374,7 @@ void main() {
     });
 
     test(r'throws HttpBytesException$Timeout when GET stalls past connect Timeout', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         middlewares: <HttpBytesMiddleware>[
           const HttpBytesTimeoutMiddleware(
             connectTimeout: Duration(milliseconds: 20),
@@ -397,7 +397,7 @@ void main() {
     });
 
     test(r'throws HttpBytesException$Timeout when body idle past receive Timeout', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         middlewares: <HttpBytesMiddleware>[
           const HttpBytesTimeoutMiddleware(
             connectTimeout: Duration(seconds: 30),
@@ -425,7 +425,7 @@ void main() {
     });
 
     test('empty middleware list does not apply default Timeout', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         middlewares: const [],
         client: MockClient((_) async {
           await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -443,7 +443,7 @@ void main() {
     test('timeout aborts AbortableRequest when the client honors abortTrigger', () async {
       var sawAbortable = false;
       var abortCompleted = false;
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         middlewares: <HttpBytesMiddleware>[
           const HttpBytesTimeoutMiddleware(
             connectTimeout: Duration(milliseconds: 30),
@@ -473,7 +473,7 @@ void main() {
 
     test(r'CancelToken cancel surfaces HttpBytesException$Cancelled', () async {
       final token = CancelToken();
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         middlewares: const [],
         client: _AbortHonoringClient(
           onRequest: (request) {
@@ -497,7 +497,7 @@ void main() {
 
     test(r'already-cancelled CancelToken surfaces HttpBytesException$Cancelled', () async {
       final token = CancelToken()..cancel();
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         middlewares: const [],
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
@@ -515,7 +515,7 @@ void main() {
     });
 
     test(r'rejects getBytes after close with HttpBytesException$Internal', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
         ),
@@ -534,7 +534,7 @@ void main() {
         [3, 4, 5],
       ];
       final reports = <(int cumulative, int? total)>[];
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: _ChunkedBodyClient(
           chunks: chunks,
           contentLength: 5,
@@ -553,7 +553,7 @@ void main() {
 
     test('reports null total when Content-Length is unknown', () async {
       final reports = <(int cumulative, int? total)>[];
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: _ChunkedBodyClient(
           chunks: [
             [9, 9],
@@ -571,7 +571,7 @@ void main() {
     });
 
     test('does not invent progress when onBytesProgress is omitted', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1, 2, 3]), 200),
         ),
@@ -598,7 +598,7 @@ void main() {
         };
       }
 
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         middlewares: [named('outer'), named('inner')],
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
@@ -611,28 +611,28 @@ void main() {
     });
   });
 
-  group('HttpBytesFetcher.configure', () {
+  group('HttpBytesClient.configure', () {
     tearDown(() async {
-      await HttpBytesFetcher.resetShared();
+      await HttpBytesClient.resetShared();
     });
 
     test('closes the previous shared instance before replace', () async {
-      final first = HttpBytesFetcher(
+      final first = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
         ),
       );
-      final second = HttpBytesFetcher(
+      final second = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([2]), 200),
         ),
       );
 
-      await HttpBytesFetcher.configure(first);
-      expect(identical(HttpBytesFetcher.shared(), first), isTrue);
+      await HttpBytesClient.configure(first);
+      expect(identical(HttpBytesClient.shared(), first), isTrue);
 
-      await HttpBytesFetcher.configure(second);
-      expect(identical(HttpBytesFetcher.shared(), second), isTrue);
+      await HttpBytesClient.configure(second);
+      expect(identical(HttpBytesClient.shared(), second), isTrue);
       expect(
         () => first.getBytes(Uri.parse('https://cdn.example.com/closed.svg')),
         throwsA(isA<HttpBytesException$Internal>()),
@@ -641,32 +641,32 @@ void main() {
     });
 
     test('resetShared closes then clears', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
         ),
       );
-      await HttpBytesFetcher.configure(fetcher);
+      await HttpBytesClient.configure(fetcher);
 
-      await HttpBytesFetcher.resetShared();
+      await HttpBytesClient.resetShared();
       expect(
         () => fetcher.getBytes(Uri.parse('https://cdn.example.com/closed.svg')),
         throwsA(isA<HttpBytesException$Internal>()),
       );
       expect(
-        identical(HttpBytesFetcher.shared(), fetcher),
+        identical(HttpBytesClient.shared(), fetcher),
         isFalse,
         reason: 'shared must not keep returning the closed instance',
       );
     });
 
     test('ImageBytesCache.resetShared also clears the configured fetcher', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
         ),
       );
-      await HttpBytesFetcher.configure(fetcher);
+      await HttpBytesClient.configure(fetcher);
 
       await ImageBytesCache.resetShared();
       expect(

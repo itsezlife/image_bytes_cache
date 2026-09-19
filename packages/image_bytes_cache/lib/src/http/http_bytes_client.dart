@@ -222,7 +222,7 @@ extension type const HttpBytesRequest(http.BaseRequest _request) implements http
   }
 }
 
-/// HTTP response from [HttpBytesFetcher]: status, headers, and body stream.
+/// HTTP response from [HttpBytesClient]: status, headers, and body stream.
 ///
 /// [stream] is single-subscription. After [_sendUnstreamed] finishes the body
 /// for coalesce, [body] holds the same bytes so joiners can call [toBytes]
@@ -254,7 +254,7 @@ final class HttpBytesResponse {
   /// Byte stream of the response body (single-subscription).
   final http.ByteStream stream;
 
-  /// Consolidated body when the fetcher has already consumed [stream].
+  /// Consolidated body when the client has already consumed [stream].
   final Uint8List? body;
 
   /// Returns the response body as bytes.
@@ -283,9 +283,9 @@ final class HttpBytesResponse {
   );
 }
 
-// --- Fetcher ---
+// --- Client ---
 
-/// {@template http_bytes_fetcher}
+/// {@template http_bytes_client}
 /// HTTP GET for response bodies, with middlewares, concurrency cap, and
 /// in-flight coalescing.
 ///
@@ -299,9 +299,9 @@ final class HttpBytesResponse {
 ///   abort). Timeout middleware cancels that same flight token and still
 ///   surfaces [HttpBytesException$Timeout], not Cancelled.
 /// {@endtemplate}
-final class HttpBytesFetcher {
-  /// {@macro http_bytes_fetcher}
-  HttpBytesFetcher({
+final class HttpBytesClient {
+  /// {@macro http_bytes_client}
+  HttpBytesClient({
     http.Client? client,
     int maxConcurrent = 6,
     Iterable<HttpBytesMiddleware>? middlewares,
@@ -321,25 +321,25 @@ final class HttpBytesFetcher {
   }
 
   /// Process-wide default when nothing is injected.
-  factory HttpBytesFetcher.shared() {
+  factory HttpBytesClient.shared() {
     _$ensureResetSharedCleanup();
-    return debugShared ?? (_shared ??= HttpBytesFetcher());
+    return debugShared ?? (_shared ??= HttpBytesClient());
   }
 
-  static HttpBytesFetcher? _shared;
+  static HttpBytesClient? _shared;
 
-  /// Test override for [HttpBytesFetcher.shared]. Set to `null` to clear.
+  /// Test override for [HttpBytesClient.shared]. Set to `null` to clear.
   @visibleForTesting
-  static HttpBytesFetcher? debugShared;
+  static HttpBytesClient? debugShared;
 
-  /// Sets the process-wide fetcher (bootstrap).
-  static Future<void> configure(HttpBytesFetcher fetcher) async {
+  /// Sets the process-wide client (bootstrap).
+  static Future<void> configure(HttpBytesClient client) async {
     _$ensureResetSharedCleanup();
     final previous = _shared;
-    if (previous != null && !identical(previous, fetcher)) {
+    if (previous != null && !identical(previous, client)) {
       await previous.close();
     }
-    _shared = fetcher;
+    _shared = client;
   }
 
   /// Closes the previous shared instance, then clears [configure] and [debugShared].
@@ -424,7 +424,7 @@ final class HttpBytesFetcher {
     if (_closed) {
       throw const HttpBytesException$Internal(
         code: 'closed',
-        message: 'HttpBytesFetcher is closed.',
+        message: 'HttpBytesClient is closed.',
         statusCode: 0,
       );
     }
@@ -733,7 +733,7 @@ Future<T> _raceCallerCancel<T>(
 }
 
 /// Client.send + status map + progress. Pool/coalesce live in
-/// [HttpBytesFetcher._coalesceThenSend]; user middlewares wrap that.
+/// [HttpBytesClient._coalesceThenSend]; user middlewares wrap that.
 HttpBytesHandler _createClientSend(
   http.Client internalClient,
   bool Function(int statusCode)? validateStatusDefault,
@@ -928,7 +928,7 @@ HttpBytesException _statusToException(
 // --- Errors ---
 
 /// {@template http_bytes_exception}
-/// Base class for all HTTP bytes fetcher exceptions.
+/// Base class for all HTTP bytes client exceptions.
 /// {@endtemplate}
 @immutable
 sealed class HttpBytesException implements Exception {
@@ -955,7 +955,7 @@ sealed class HttpBytesException implements Exception {
 }
 
 /// {@template http_bytes_exception_internal}
-/// Internal (client-side) exception — empty body, closed fetcher, or unknown
+/// Internal (client-side) exception — empty body, closed client, or unknown
 /// error. This is NOT an HTTP "client error (4xx)" — those are
 /// [HttpBytesException$Request]. [statusCode] is 0 unless a partial response
 /// was already seen.

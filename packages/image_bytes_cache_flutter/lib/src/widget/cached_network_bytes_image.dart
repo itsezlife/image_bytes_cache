@@ -91,7 +91,7 @@ class CachedNetworkBytesImage extends StatefulWidget {
   final ImageFrameBuilder? frameBuilder;
 
   /// See [Image.loadingBuilder]. Network-miss [ImageChunkEvent]s are real
-  /// fetcher bytes; durable cache hits do not invent mid-download progress.
+  /// client bytes; durable cache hits do not invent mid-download progress.
   final ImageLoadingBuilder? loadingBuilder;
 
   /// Built when the [ImageStream] reports a failure.

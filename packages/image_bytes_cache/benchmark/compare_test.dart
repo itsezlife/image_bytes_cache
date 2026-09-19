@@ -12,7 +12,7 @@ import 'compare.dart';
 /// Not a correctness suite and not a CI merge gate. Prints paste-ready tables.
 /// Optional `--dart-define=MEMORY_LANE=true` adds an RSS fill/prune table.
 ///
-/// Process-wide shared cache / resolver / fetcher are cleared around the suite
+/// Process-wide shared cache / resolver / client are cleared around the suite
 /// so a leaked configure from another harness cannot poison rows. Scenario
 /// bodies use local instances only.
 ///
@@ -24,13 +24,13 @@ import 'compare.dart';
 void main() {
   setUp(() async {
     await ImageBytesCache.resetShared();
-    HttpBytesFetcher.debugShared = null;
+    HttpBytesClient.debugShared = null;
     ImageBytesResolver.debugShared = null;
   });
 
   tearDown(() async {
     await ImageBytesCache.resetShared();
-    HttpBytesFetcher.debugShared = null;
+    HttpBytesClient.debugShared = null;
     ImageBytesResolver.debugShared = null;
   });
 

@@ -78,7 +78,7 @@ _Avoid_: failing resolve when durable write fails; sticky empty capacity waste;
 replacing resolve with a streaming public API for progress alone; fake
 progress events that are not tied to real fetch bytes
 
-**HttpBytesFetcher**:
+**HttpBytesClient**:
 HTTP GET with concurrency pool and in-flight coalesce by `ImageCacheKey` identity
 (canonical URL + canonical headers). Timeout after pool slot via
 `AbortableRequest` (aborts when the client honors it). Pool wait for a slot is
@@ -104,8 +104,8 @@ Host wiring. VM `directory` must be under a reclaimable cache root. Web ignores
 `throwOnOpenFailure` is set; platform open closes any partial worker / web
 handles first. Missing VM directory still throws. `configure` closes the
 previous instance before assign; `resetShared` closes then clears, including
-`ImageBytesResolver` and `HttpBytesFetcher` shared wiring. `ImageBytesResolver.shared`
-looks up the current shared cache/fetcher on each resolve (not a one-shot
+`ImageBytesResolver` and `HttpBytesClient` shared wiring. `ImageBytesResolver.shared`
+looks up the current shared cache/client on each resolve (not a one-shot
 snapshot).
 _Avoid_: documents/support paths for remote image bytes; Config paths inside
 package open code; letting open throw kill bootstrap when storage is optional;

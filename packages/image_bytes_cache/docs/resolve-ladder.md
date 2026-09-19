@@ -17,7 +17,7 @@ bytes are length-prefixed URL + canonical headers (not a `url|headers` string
 join), so a `|` inside the URL or a header value cannot forge another
 `(url, headers)` pair.
 
-`HttpBytesFetcher` in-flight coalesce uses `ImageCacheKey.fromUrl(…).value`
+`HttpBytesClient` in-flight coalesce uses `ImageCacheKey.fromUrl(…).value`
 **after** request-mutating middleware runs, so Bearer-injected `Authorization`
 participates in the coalesce key (different tokens do not share a flight).
 Durable resolve identity remains the request’s `ImageCacheKey` / `cacheKey`
@@ -46,7 +46,7 @@ ladder will not silently share one override across different Authorization
 values.
 
 `onBytesProgress` is an optional sink (`cumulative`, optional `total`) for
-honest HTTP body progress. The ladder forwards it to `HttpBytesFetcher` on a
+honest HTTP body progress. The ladder forwards it to `HttpBytesClient` on a
 **network miss** only. A durable non-empty cache hit returns bytes without
 invoking the sink — do not invent mid-download percents from silence. Resolve
 remains a single `Future<Uint8List>` of the full body; there is no public
@@ -60,22 +60,22 @@ identity or in-flight coalesce.
    the ladder). Durable stores also refuse to retain empty writes (evict the
    key instead) and scrub sticky empty rows on read so they cannot waste
    `maxEntries` capacity.
-3. `HttpBytesFetcher.getBytes` on `Uri.base.resolve(url)` on miss, forwarding
+3. `HttpBytesClient.getBytes` on `Uri.base.resolve(url)` on miss, forwarding
    `onBytesProgress` when present.
 4. Return network bytes; schedule `cache.write` with `unawaited`. Write failure
    reports through `ImageBytesDiagnostics` and does **not** fail `resolve`.
    A throwing host `onEvent` callback is swallowed inside `report` so the
    unawaited catch path cannot become a second unhandled async error.
 
-Inject cache and fetcher in tests. Production paint usually uses
+Inject cache and client in tests. Production paint usually uses
 `ImageBytesResolver.shared()`, which **re-reads** `ImageBytesCache.shared()`
-and `HttpBytesFetcher.shared()` (or `debugShared` overrides) on every
+and `HttpBytesClient.shared()` (or `debugShared` overrides) on every
 `resolve`. It does not snapshot them at first call, so configure after an
 early paint still enables durable caching, and configure replacement /
 `resetShared` cannot leave the ladder bound to NoOp or a closed previous
 store.
 
-## HTTP: `HttpBytesFetcher`
+## HTTP: `HttpBytesClient`
 
 GET bodies only. Callers own disk cache and decode.
 
@@ -125,13 +125,13 @@ and never retries `$Timeout` / `$Cancelled` / `$Authentication`. Place it
 via `developer.log` (`http_bytes`); place outermost to include retry time.
 
 When `onBytesProgress` is supplied on the caller that **starts** the in-flight
-GET, the fetcher reports cumulative bytes as the response body is read (`total`
+GET, the client reports cumulative bytes as the response body is read (`total`
 from Content-Length when present). Without a sink, the body is consolidated
 without inventing chunk events. Coalesced joiners each get their own Future to
 the same buffered response; the progress sink does not change coalesce identity.
 
 After `close`, new `send` / `getBytes` calls throw `HttpBytesException$Internal`;
-in-flight work may still finish or fail. If the fetcher created its own
+in-flight work may still finish or fail. If the client created its own
 `http.Client`, `close` closes that client. Pool wait before a slot is not timed
 — raise `maxConcurrent` or reduce host concurrency if queue latency dominates.
 
@@ -176,19 +176,19 @@ The package does not depend on a product logger. Hosts bridge
 assign so workers and Cache handles do not leak across reconfigure.
 `shared()` returns `NoOpImageBytesCache` until configure (or `debugShared`).
 `resetShared` (tests) closes, clears configure and debug overrides, resets
-diagnostics to silent, and clears `ImageBytesResolver` / `HttpBytesFetcher`
+diagnostics to silent, and clears `ImageBytesResolver` / `HttpBytesClient`
 shared wiring via registered hooks.
 
-`HttpBytesFetcher.configure(fetcher)` mirrors the same close-then-assign rule
+`HttpBytesClient.configure(client)` mirrors the same close-then-assign rule
 for the process-wide HTTP client (pool + owned client). Hosts that want
 Cronet / Cupertino / a shared `IOClient` bootstrap once here; paint widgets
 that default to `ImageBytesResolver.shared()` pick it up without threading a
-fetcher. `HttpBytesFetcher.shared()` returns `debugShared`, else the
+client. `HttpBytesClient.shared()` returns `debugShared`, else the
 configured instance, else a lazily constructed default.
 
 Bootstrap order: open (with diagnostics) → configure cache → optionally
-configure fetcher → paint via `ImageBytesResolver.shared()` (typically from
+configure client → paint via `ImageBytesResolver.shared()` (typically from
 `image_bytes_cache_flutter` widgets or an injected resolver). Calling shared
 resolve **before** configure is safe: later configure is visible on the next
-resolve. Resolver and fetcher shared factories stay thin; do not invent a
+resolve. Resolver and client shared factories stay thin; do not invent a
 fourth process-wide global for the same ladder.

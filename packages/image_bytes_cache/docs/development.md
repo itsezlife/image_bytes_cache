@@ -54,7 +54,7 @@ on this path).
 | `ImageBytesCache.open` (web / Chrome) | Size routing, reopen, reclaim on Cache and OPFS |
 | `ImageBytesBlobStore$File$VM` | Worker death fails pending RPC (timeout-bounded); respawn after death; exclusive gate not stuck |
 | `ImageBytesResolver` | Hit skips network; empty cache misses; write-through failure (incl. index commit throw) still returns bytes; throwing `onEvent` is not unhandled |
-| `HttpBytesFetcher` | Coalesce, pool, non-2xx, empty body, timeout (+ abort when client honors), close, configure / resetShared |
+| `HttpBytesClient` | Coalesce, pool, non-2xx, empty body, timeout (+ abort when client honors), close, configure / resetShared |
 | `ImageCacheKey` | Canonical headers; distinct URLs with same basename |
 
 Prefer fakes for `IImageBytesIndex` / `IImageBytesBlobStore` when testing the
@@ -68,8 +68,8 @@ lib/
   src/
     image_bytes_cache.dart        # brain + facade + Memory/NoOp
     image_bytes_resolver.dart
-    http/                         # fetcher + request/response/exception/middleware grammar
-      http_bytes_fetcher.dart
+    http/                         # client + request/response/exception/middleware grammar
+      http_bytes_client.dart
       middlewares/
         timeout_middleware.dart
         retry_middleware.dart
@@ -124,9 +124,9 @@ one runner / baseline file:
 2. **Resolve ladder** (`ladder_scenarios.dart`) — `ImageBytesResolver` over
    in-process `MockClient` HTTP (no public internet): miss → write-through →
    warm hit, same-URL burst coalesce, distinct-key grid under the HTTP pool
-   cap. Scenario bodies use local cache/fetcher/resolver only (never
+   cap. Scenario bodies use local cache/client/resolver only (never
    process-wide shared). `compare_test.dart` clears shared cache / resolver /
-   fetcher in setUp/tearDown so a leaked configure from another harness cannot
+   client in setUp/tearDown so a leaked configure from another harness cannot
    poison the suite.
 
 Optional **memory lane** (`MEMORY_LANE=true`): RSS via

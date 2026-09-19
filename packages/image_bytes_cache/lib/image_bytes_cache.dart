@@ -7,7 +7,7 @@
 /// resolve via [ImageBytesResolver] (cache → network coalesce → write-through).
 ///
 /// Wire shared instances with [ImageBytesCache.configure] /
-/// [ImageBytesCache.open] and optionally [HttpBytesFetcher.configure] for a
+/// [ImageBytesCache.open] and optionally [HttpBytesClient.configure] for a
 /// process-wide HTTP client. Soft storage failures report through
 /// [ImageBytesDiagnostics]. Open degrades to an in-memory store on hard
 /// failure unless [ImageBytesCache.open] is called with
@@ -17,7 +17,7 @@ library;
 
 export 'package:cancel_token/cancel_token.dart' show CancelToken, CancelledException;
 
-export 'src/http/http_bytes_fetcher.dart';
+export 'src/http/http_bytes_client.dart';
 export 'src/http/middlewares/bearer_middleware.dart';
 export 'src/http/middlewares/logger_middleware.dart';
 export 'src/http/middlewares/retry_middleware.dart';

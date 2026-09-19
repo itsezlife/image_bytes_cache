@@ -12,8 +12,8 @@ import 'sink.dart';
 /// Resolve-ladder microbench rows (fake HTTP, no public internet).
 ///
 /// Each [StoreScenario.prepare] owns a local [MemoryImageBytesCache] and
-/// [HttpBytesFetcher] — never [ImageBytesCache.shared] /
-/// [ImageBytesResolver.shared] / [HttpBytesFetcher.shared]. The compare test
+/// [HttpBytesClient] — never [ImageBytesCache.shared] /
+/// [ImageBytesResolver.shared] / [HttpBytesClient.shared]. The compare test
 /// entry resets process-wide shareds around the suite so a leaked configure
 /// from another harness cannot poison rows.
 List<StoreScenario> ladderScenarios() {
@@ -201,7 +201,7 @@ StoreScenario _distinctKeyGrid(String name, Uint8List payload) => StoreScenario(
 ({
   IImageBytesCache cache,
   ImageBytesResolver resolver,
-  HttpBytesFetcher fetcher,
+  HttpBytesClient client,
   int Function() fetchCount,
   Future<void> Function() dispose,
 })
@@ -211,26 +211,26 @@ _openLadder({
   Duration responseDelay = Duration.zero,
 }) {
   var fetches = 0;
-  final client = MockClient((request) async {
+  final httpClient = MockClient((request) async {
     fetches++;
     if (responseDelay > Duration.zero) {
       await Future<void>.delayed(responseDelay);
     }
     return http.Response.bytes(payload, 200);
   });
-  final fetcher = HttpBytesFetcher(
-    client: client,
+  final client = HttpBytesClient(
+    client: httpClient,
     maxConcurrent: maxConcurrent,
   );
   final cache = MemoryImageBytesCache(retention: ImageBytesRetention.standard);
-  final resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+  final resolver = ImageBytesResolver(cache: cache, client: client);
   return (
     cache: cache,
     resolver: resolver,
-    fetcher: fetcher,
+    client: client,
     fetchCount: () => fetches,
     dispose: () async {
-      await fetcher.close();
+      await client.close();
       await cache.close();
     },
   );

@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:image_bytes_cache/src/http/http_bytes_fetcher.dart';
+import 'package:image_bytes_cache/src/http/http_bytes_client.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 import 'package:image_bytes_cache/src/image_bytes_diagnostics.dart';
 import 'package:image_bytes_cache/src/image_bytes_resolver.dart';
@@ -14,16 +14,16 @@ void main() {
     test('network miss fetches once and write-through to cache', () async {
       var hits = 0;
       final body = Uint8List.fromList([7, 8, 9]);
-      final fetcher = HttpBytesFetcher(
+      final client = HttpBytesClient(
         client: MockClient((_) async {
           hits++;
           return http.Response.bytes(body, 200);
         }),
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       final cache = MemoryImageBytesCache();
-      final resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+      final resolver = ImageBytesResolver(cache: cache, client: client);
 
       final bytes = await resolver.resolve(
         const ImageBytesRequest(url: 'https://cdn.example.com/a.svg'),
@@ -39,20 +39,20 @@ void main() {
 
     test('cache hit skips HTTP', () async {
       var hits = 0;
-      final fetcher = HttpBytesFetcher(
+      final client = HttpBytesClient(
         client: MockClient((_) async {
           hits++;
           return http.Response.bytes(Uint8List.fromList([1]), 200);
         }),
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       final cache = MemoryImageBytesCache();
       const url = 'https://cdn.example.com/cached.svg';
       final key = ImageCacheKey.fromUrl(url);
       await cache.write(key, Uint8List.fromList([4, 5, 6]));
 
-      final resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+      final resolver = ImageBytesResolver(cache: cache, client: client);
       final bytes = await resolver.resolve(const ImageBytesRequest(url: url));
 
       expect(bytes, Uint8List.fromList([4, 5, 6]));
@@ -61,7 +61,7 @@ void main() {
 
     test('network miss forwards onBytesProgress from the request', () async {
       final reports = <(int cumulative, int? total)>[];
-      final fetcher = HttpBytesFetcher(
+      final client = HttpBytesClient(
         client: _ResolverChunkedBodyClient(
           chunks: [
             [1, 2, 3],
@@ -70,11 +70,11 @@ void main() {
           contentLength: 4,
         ),
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       final resolver = ImageBytesResolver(
         cache: MemoryImageBytesCache(),
-        fetcher: fetcher,
+        client: client,
       );
 
       final bytes = await resolver.resolve(
@@ -91,19 +91,19 @@ void main() {
     test('durable cache hit does not synthesize mid-download progress', () async {
       var hits = 0;
       final reports = <(int cumulative, int? total)>[];
-      final fetcher = HttpBytesFetcher(
+      final client = HttpBytesClient(
         client: MockClient((_) async {
           hits++;
           return http.Response.bytes(Uint8List.fromList([1]), 200);
         }),
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       final cache = MemoryImageBytesCache();
       const url = 'https://cdn.example.com/warm.svg';
       await cache.write(ImageCacheKey.fromUrl(url), Uint8List.fromList([9, 9]));
 
-      final resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+      final resolver = ImageBytesResolver(cache: cache, client: client);
       final bytes = await resolver.resolve(
         ImageBytesRequest(
           url: url,
@@ -119,17 +119,17 @@ void main() {
     test('empty cached payload counts as miss and fetches network', () async {
       var hits = 0;
       final body = Uint8List.fromList([8, 8]);
-      final fetcher = HttpBytesFetcher(
+      final client = HttpBytesClient(
         client: MockClient((_) async {
           hits++;
           return http.Response.bytes(body, 200);
         }),
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       final cache = _StickyEmptyImageBytesCache();
       const url = 'https://cdn.example.com/empty-cached.svg';
-      final resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+      final resolver = ImageBytesResolver(cache: cache, client: client);
 
       expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
       expect(hits, 1);
@@ -137,15 +137,15 @@ void main() {
 
     test('write-through failure still returns network bytes and reports', () async {
       final body = Uint8List.fromList([1, 2, 3]);
-      final fetcher = HttpBytesFetcher(
+      final client = HttpBytesClient(
         client: MockClient((_) async => http.Response.bytes(body, 200)),
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       final events = <ImageBytesLogEvent>[];
       final resolver = ImageBytesResolver(
         cache: const _ThrowingWriteImageBytesCache(),
-        fetcher: fetcher,
+        client: client,
         diagnostics: ImageBytesDiagnostics.onEvent(events.add),
       );
 
@@ -163,10 +163,10 @@ void main() {
 
     test('index commit failure on write-through still returns network bytes', () async {
       final body = Uint8List.fromList([5, 5]);
-      final fetcher = HttpBytesFetcher(
+      final client = HttpBytesClient(
         client: MockClient((_) async => http.Response.bytes(body, 200)),
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       final index = _CommitFailingIndex();
       final blobs = _MapBlobStore();
@@ -178,7 +178,7 @@ void main() {
       final events = <ImageBytesLogEvent>[];
       final resolver = ImageBytesResolver(
         cache: cache,
-        fetcher: fetcher,
+        client: client,
         diagnostics: ImageBytesDiagnostics.onEvent(events.add),
       );
       const url = 'https://cdn.example.com/commit-fail.svg';
@@ -195,17 +195,17 @@ void main() {
 
     test('throwing onEvent during write-through catch is not an unhandled async error', () async {
       final body = Uint8List.fromList([4, 4, 4]);
-      final fetcher = HttpBytesFetcher(
+      final client = HttpBytesClient(
         client: MockClient((_) async => http.Response.bytes(body, 200)),
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       final errors = <Object>[];
       await runZonedGuarded(
         () async {
           final resolver = ImageBytesResolver(
             cache: const _ThrowingWriteImageBytesCache(),
-            fetcher: fetcher,
+            client: client,
             diagnostics: ImageBytesDiagnostics.onEvent((_) {
               throw StateError('host diagnostics blew up');
             }),
@@ -233,10 +233,10 @@ void main() {
 
     test('silent diagnostics emits nothing on write-through failure', () async {
       final body = Uint8List.fromList([9]);
-      final fetcher = HttpBytesFetcher(
+      final client = HttpBytesClient(
         client: MockClient((_) async => http.Response.bytes(body, 200)),
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       final events = <ImageBytesLogEvent>[];
       ImageBytesDiagnostics.current = ImageBytesDiagnostics.onEvent(events.add);
@@ -244,7 +244,7 @@ void main() {
 
       final resolver = ImageBytesResolver(
         cache: const _ThrowingWriteImageBytesCache(),
-        fetcher: fetcher,
+        client: client,
         diagnostics: const ImageBytesDiagnostics.silent(),
       );
 
@@ -261,16 +261,16 @@ void main() {
     test('relative and absolute Uri.base equivalents share one durable key', () async {
       var hits = 0;
       final body = Uint8List.fromList([3, 3, 3]);
-      final fetcher = HttpBytesFetcher(
+      final client = HttpBytesClient(
         client: MockClient((_) async {
           hits++;
           return http.Response.bytes(body, 200);
         }),
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       final cache = MemoryImageBytesCache();
-      final resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+      final resolver = ImageBytesResolver(cache: cache, client: client);
 
       const relative = 'icons/shared.svg';
       final absolute = Uri.base.resolve(relative).toString();
@@ -287,17 +287,17 @@ void main() {
     test('explicit cacheKey is full identity — headers do not change the key', () async {
       var hits = 0;
       final body = Uint8List.fromList([2, 2]);
-      final fetcher = HttpBytesFetcher(
+      final client = HttpBytesClient(
         client: MockClient((request) async {
           hits++;
           expect(request.headers['authorization'], isNotNull);
           return http.Response.bytes(body, 200);
         }),
       );
-      addTearDown(fetcher.close);
+      addTearDown(client.close);
 
       final cache = MemoryImageBytesCache();
-      final resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+      final resolver = ImageBytesResolver(cache: cache, client: client);
       const key = ImageCacheKey('host_override_key');
 
       await resolver.resolve(
@@ -330,13 +330,13 @@ void main() {
   group('ImageBytesResolver.shared live wiring', () {
     tearDown(() async {
       await ImageBytesCache.resetShared();
-      HttpBytesFetcher.debugShared = null;
+      HttpBytesClient.debugShared = null;
       ImageBytesResolver.debugShared = null;
     });
 
     test('resolve after prior shared call then configure hits the configured store', () async {
       final body = Uint8List.fromList([3, 2, 1]);
-      HttpBytesFetcher.debugShared = HttpBytesFetcher(
+      HttpBytesClient.debugShared = HttpBytesClient(
         client: MockClient((_) async => http.Response.bytes(body, 200)),
       );
 
@@ -363,7 +363,7 @@ void main() {
 
     test('configure replacement does not leave shared resolve on a closed previous cache', () async {
       final body = Uint8List.fromList([9, 8, 7]);
-      HttpBytesFetcher.debugShared = HttpBytesFetcher(
+      HttpBytesClient.debugShared = HttpBytesClient(
         client: MockClient((_) async => http.Response.bytes(body, 200)),
       );
 
@@ -392,7 +392,7 @@ void main() {
 
     test('resetShared clears shared wiring so later configure is visible', () async {
       final body = Uint8List.fromList([5]);
-      HttpBytesFetcher.debugShared = HttpBytesFetcher(
+      HttpBytesClient.debugShared = HttpBytesClient(
         client: MockClient((_) async => http.Response.bytes(body, 200)),
       );
 
@@ -404,9 +404,9 @@ void main() {
 
       await ImageBytesCache.resetShared();
 
-      // resetShared clears fetcher debugShared too; re-install a mock for the
+      // resetShared clears client debugShared too; re-install a mock for the
       // post-reset resolve (no public internet in this suite).
-      HttpBytesFetcher.debugShared = HttpBytesFetcher(
+      HttpBytesClient.debugShared = HttpBytesClient(
         client: MockClient((_) async => http.Response.bytes(body, 200)),
       );
 
@@ -423,17 +423,17 @@ void main() {
       );
     });
 
-    test('HttpBytesFetcher.configure is visible to shared resolve without injecting a resolver', () async {
+    test('HttpBytesClient.configure is visible to shared resolve without injecting a resolver', () async {
       final body = Uint8List.fromList([4, 5, 6]);
       await ImageBytesCache.configure(MemoryImageBytesCache());
-      await HttpBytesFetcher.configure(
-        HttpBytesFetcher(
+      await HttpBytesClient.configure(
+        HttpBytesClient(
           client: MockClient((_) async => http.Response.bytes(body, 200)),
         ),
       );
 
       final bytes = await ImageBytesResolver.shared().resolve(
-        const ImageBytesRequest(url: 'https://cdn.example.com/configured-fetcher.svg'),
+        const ImageBytesRequest(url: 'https://cdn.example.com/configured-client.svg'),
       );
 
       expect(bytes, body);

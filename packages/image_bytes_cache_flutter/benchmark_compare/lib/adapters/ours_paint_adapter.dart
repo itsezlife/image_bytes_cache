@@ -20,7 +20,7 @@ Future<IPaintFeedAdapter> openOursPaintAdapter({
   int maxConcurrent = 6,
 }) async {
   final httpHarness = corpusHttpClient(responseDelay: responseDelay);
-  final fetcher = HttpBytesFetcher(
+  final httpBytesClient = HttpBytesClient(
     client: httpHarness.client,
     maxConcurrent: maxConcurrent,
   );
@@ -36,15 +36,15 @@ Future<IPaintFeedAdapter> openOursPaintAdapter({
       throwOnOpenFailure: true,
     );
   }
-  final resolver = ImageBytesResolver(cache: cache, fetcher: fetcher);
+  final resolver = ImageBytesResolver(cache: cache, client: httpBytesClient);
   return _OursPaintAdapter(
     id: 'ours',
     label: 'image_bytes_cache',
     root: root,
     cache: cache,
-    fetcher: fetcher,
+    httpBytesClient: httpBytesClient,
     resolver: resolver,
-    client: httpHarness.client,
+    httpClient: httpHarness.client,
   );
 }
 
@@ -54,14 +54,14 @@ final class _OursPaintAdapter implements IPaintFeedAdapter {
     required this.label,
     required Directory? root,
     required IImageBytesCache cache,
-    required HttpBytesFetcher fetcher,
+    required HttpBytesClient httpBytesClient,
     required ImageBytesResolver resolver,
-    required http.Client client,
+    required http.Client httpClient,
   }) : _root = root,
        _cache = cache,
-       _fetcher = fetcher,
+       _httpBytesClient = httpBytesClient,
        _resolver = resolver,
-       _client = client;
+       _httpClient = httpClient;
 
   @override
   final String id;
@@ -71,9 +71,9 @@ final class _OursPaintAdapter implements IPaintFeedAdapter {
 
   final Directory? _root;
   final IImageBytesCache _cache;
-  final HttpBytesFetcher _fetcher;
+  final HttpBytesClient _httpBytesClient;
   final ImageBytesResolver _resolver;
-  final http.Client _client;
+  final http.Client _httpClient;
   final _seen = <ImageCacheKey>{};
   var _closed = false;
 
@@ -121,9 +121,9 @@ final class _OursPaintAdapter implements IPaintFeedAdapter {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
-    await _fetcher.close();
+    await _httpBytesClient.close();
     await _cache.close();
-    _client.close();
+    _httpClient.close();
     final root = _root;
     if (root != null && root.existsSync()) {
       await root.delete(recursive: true);

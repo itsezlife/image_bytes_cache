@@ -10,7 +10,7 @@ void main() {
   group(r'HttpBytesLoggerMiddleware$Developer', () {
     test('emits on success without changing the body', () async {
       final lines = <String>[];
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1, 2]), 200),
         ),
@@ -34,7 +34,7 @@ void main() {
 
     test('emits typed error code then rethrows', () async {
       final lines = <String>[];
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient((_) async => http.Response('gone', 404)),
         middlewares: <HttpBytesMiddleware>[
           HttpBytesLoggerMiddleware$Developer(
@@ -60,7 +60,7 @@ void main() {
         lines.add(message);
       }
 
-      final ok = HttpBytesFetcher(
+      final ok = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
         ),
@@ -75,7 +75,7 @@ void main() {
       await ok.getBytes(Uri.parse('https://cdn.test/ok.png'));
       expect(lines, isEmpty);
 
-      final bad = HttpBytesFetcher(
+      final bad = HttpBytesClient(
         client: MockClient((_) async => http.Response('x', 500)),
         middlewares: <HttpBytesMiddleware>[
           HttpBytesLoggerMiddleware$Developer(
@@ -94,7 +94,7 @@ void main() {
 
     test('logRequest emits before the handler', () async {
       final lines = <String>[];
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([1]), 200),
         ),
@@ -116,7 +116,7 @@ void main() {
     });
 
     test('emission failures do not fail the send', () async {
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient(
           (_) async => http.Response.bytes(Uint8List.fromList([9]), 200),
         ),
@@ -137,7 +137,7 @@ void main() {
     test('outermost over Retry observes post-retry latency', () async {
       var attempts = 0;
       final lines = <String>[];
-      final fetcher = HttpBytesFetcher(
+      final fetcher = HttpBytesClient(
         client: MockClient((_) async {
           attempts++;
           if (attempts == 1) {

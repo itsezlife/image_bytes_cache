@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:image_bytes_cache/src/http/http_bytes_fetcher.dart';
+import 'package:image_bytes_cache/src/http/http_bytes_client.dart';
 import 'package:image_bytes_cache/src/http/retry_backoff.dart';
 import 'package:meta/meta.dart';
 
@@ -41,11 +41,11 @@ Duration? _retryAfter(Object error) {
 /// full-jitter exponential backoff ([HttpBytesRetryBackoff]), honoring `Retry-After`
 /// and a total time budget.
 ///
-/// Opt-in — not part of the default [HttpBytesFetcher] middleware list. Place
+/// Opt-in — not part of the default [HttpBytesClient] middleware list. Place
 /// **outside** [HttpBytesTimeoutMiddleware] so each attempt gets a fresh connect/receive
 /// budget:
 /// ```dart
-/// HttpBytesFetcher(
+/// HttpBytesClient(
 ///   middlewares: [
 ///     HttpBytesRetryMiddleware(),
 ///     const HttpBytesTimeoutMiddleware(),
