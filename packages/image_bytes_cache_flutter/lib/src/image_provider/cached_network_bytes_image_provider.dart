@@ -19,8 +19,10 @@ import 'package:image_bytes_cache/image_bytes_cache.dart';
 ///
 /// Flutter [ImageCache] equality is [cacheKey], [scale], and optional decode
 /// size ([cacheWidth] / [cacheHeight] / [allowUpscaling]). Durable store and
-/// HTTP coalesce identity stay [ImageCacheKey] alone. [resolver] and
-/// [errorListener] are wiring only and do not participate in equality.
+/// HTTP coalesce identity stay [ImageCacheKey] alone, always
+/// [ImageCacheKey.fromUrl] of [url] + [headers]. This type does not take an
+/// [ImageBytesRequest.cacheKey] override. [resolver] and [errorListener] are
+/// wiring only and do not participate in equality.
 ///
 /// Prefer [cacheWidth] / [cacheHeight] (or [.sized]) when the host needs
 /// display-sized bitmaps under [DecorationImage], [CircleAvatar], or any
@@ -135,10 +137,13 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
   /// work on their own.
   final ImageErrorListener? errorListener;
 
-  /// Durable identity for [url] + [headers] ([ImageCacheKey.fromUrl]).
+  /// Default durable identity for [url] + [headers] ([ImageCacheKey.fromUrl]).
   ///
-  /// Flutter [ImageCache] keys this provider as [cacheKey], [scale], and
-  /// optional decode size — not this getter alone.
+  /// Flutter [ImageCache] equality uses this with [scale] and optional decode
+  /// size. This is not an [ImageBytesRequest.cacheKey] override: the provider
+  /// always resolves with a null request override, so headers stay in durable
+  /// and coalesce identity. To mint a custom key, call [IImageBytesResolver]
+  /// yourself or inject a resolver that does.
   ImageCacheKey get cacheKey => ImageCacheKey.fromUrl(url, headers: headers);
 
   bool get _hasDecodeSize => cacheWidth != null || cacheHeight != null;

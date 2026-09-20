@@ -8,13 +8,13 @@ import 'package:meta/meta.dart';
 ///
 /// Evict, prune, and close still forward. Skip means do not read or retain
 /// bytes for this dispatch, not disable the store. Does not disable HTTP; the
-/// ladder still fetches. Composes with revalidation later: skip is no durable
-/// store, not ignore validators on a store you skipped.
+/// ladder still fetches.
 ///
-/// Seed via [MiddlewareImageBytesCache.execute] with a shared [CacheContext]
-/// (resolver plumbing will set [CacheContext.skipCache] end-to-end). Public
-/// [IImageBytesCache.read] / [IImageBytesCache.write] on the wrapper use an
-/// empty context, so they only skip when [shouldSkip] decides without the flag.
+/// Seed via [MiddlewareImageBytesCache.execute] with a shared [CacheContext].
+/// [ImageBytesRequest.skipCache] does this through [ImageBytesResolver].
+/// Public [IImageBytesCache.read] / [IImageBytesCache.write] on the wrapper use
+/// an empty context, so they only skip when [shouldSkip] decides without the
+/// flag.
 ///
 /// ```dart
 /// final cache = MiddlewareImageBytesCache(

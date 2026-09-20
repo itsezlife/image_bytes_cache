@@ -70,9 +70,10 @@ extension type HttpBytesMiddlewareWrapper._(HttpBytesMiddleware _fn) {
 
 /// Per-send middleware context: typed slots over a shared [Map].
 ///
-/// Timeouts, retry flags, progress, and conditional validators
-/// ([etag] / [lastModified] for [HttpBytesConditionalMiddleware]) share this
-/// bag. Resolver / host code seeds slots before [HttpBytesClient.send].
+/// Timeouts, retry flags, progress, conditional validators
+/// ([etag] / [lastModified] for [HttpBytesConditionalMiddleware]), and
+/// [identityOverride] (coalesce key from the resolver) live here. Seed slots
+/// before [HttpBytesClient.send].
 extension type HttpBytesContext(Map<String, Object?> _map) implements Map<String, Object?> {
   /// Empty context for a new send.
   factory HttpBytesContext.empty() => HttpBytesContext(<String, Object?>{});
@@ -110,6 +111,11 @@ extension type HttpBytesContext(Map<String, Object?> _map) implements Map<String
   /// Stored `Last-Modified` validator for [HttpBytesConditionalMiddleware]
   /// (`If-Modified-Since`).
   static const lastModifiedKey = 'last-modified';
+
+  /// Explicit coalesce identity ([ImageCacheKey]). When set, post-middleware
+  /// URL + headers are ignored for the in-flight key; headers still go on the
+  /// wire. [ImageBytesResolver] sets this from [ImageBytesRequest.cacheKey].
+  static const identityOverrideKey = 'identity-override';
 
   /// Shared flight [CancelToken] for this send (AbortableRequest abort + Timeout).
   ///
@@ -183,6 +189,17 @@ extension type HttpBytesContext(Map<String, Object?> _map) implements Map<String
     _ => null,
   };
   set lastModified(String? value) => _set(lastModifiedKey, value);
+
+  /// Explicit coalesce identity. When set, wins over post-middleware URL +
+  /// headers for the in-flight key. Durable ladder keys use the same value via
+  /// [ImageBytesRequest.cacheKey]. Representation headers still hit the wire.
+  /// Minting one override across different `Authorization` values is your
+  /// responsibility.
+  ImageCacheKey? get identityOverride => switch (_map[identityOverrideKey]) {
+    final ImageCacheKey k => k,
+    _ => null,
+  };
+  set identityOverride(ImageCacheKey? value) => _set(identityOverrideKey, value);
 
   void _set(String key, Object? value) {
     if (value == null) {
@@ -320,10 +337,12 @@ final class HttpBytesResponse {
 ///
 /// Concurrent callers that share the same **post-middleware** coalesce identity
 /// join one in-flight GET. Identity is `ImageCacheKey` from the request URL +
-/// headers after request-mutating middleware (e.g. Bearer) runs. Conditional
-/// request headers (`If-None-Match` / `If-Modified-Since` / equivalents) are
-/// excluded from that fingerprint so local validators do not fragment flights.
-/// Each caller may pass its own [CancelToken]:
+/// headers after request-mutating middleware (e.g. Bearer) runs, unless
+/// [HttpBytesContext.identityOverride] is set (resolver `cacheKey`). Then the
+/// override wins for coalesce. Conditional request headers (`If-None-Match` /
+/// `If-Modified-Since` / equivalents) are excluded from the URL+headers
+/// fingerprint so local validators do not fragment flights. Each caller may
+/// pass its own [CancelToken]:
 /// - canceling one subscriber completes only that caller with
 ///   [HttpBytesException$Cancelled] and leaves the flight running;
 /// - canceling the last subscriber cancels the shared flight token (socket
@@ -430,17 +449,22 @@ final class HttpBytesClient {
   );
 
   /// GETs [url] and returns the response body (delegates to [_sendUnstreamed]).
+  ///
+  /// Pass [context] to seed typed slots (e.g. [HttpBytesContext.identityOverride]
+  /// for coalesce, [HttpBytesContext.etag] for conditional middleware).
   Future<Uint8List> getBytes(
     Uri url, {
     Map<String, String>? headers,
     ImageBytesProgressCallback? onBytesProgress,
     CancelToken? cancelToken,
+    Map<String, Object?>? context,
   }) async {
     final response = await _sendUnstreamed(
       url: url,
       headers: headers,
       cancelToken: cancelToken,
       onBytesProgress: onBytesProgress,
+      context: context,
     );
     return response.toBytes();
   }
@@ -557,10 +581,15 @@ final class HttpBytesClient {
     return (request, context) async {
       final callerToken = context.callerCancelToken ?? CancelToken();
 
-      final key = ImageCacheKey.fromUrl(
-        request.url.toString(),
-        headers: request.headers,
-      ).value;
+      // Explicit override (resolver cacheKey) wins for coalesce; otherwise
+      // fingerprint post-middleware URL + headers (Bearer Auth participates;
+      // conditionals are stripped inside ImageCacheKey.canonicalHeaders).
+      final key =
+          context.identityOverride?.value ??
+          ImageCacheKey.fromUrl(
+            request.url.toString(),
+            headers: request.headers,
+          ).value;
 
       final existing = _inFlight[key];
       if (existing != null) {

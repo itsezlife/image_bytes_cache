@@ -1,11 +1,24 @@
 ## Unreleased
 
 - **ADDED**: Opt-in `HttpBytesConditionalMiddleware`. Seed
-  `HttpBytesContext.etag` and/or `lastModified`; non-empty values become
-  `If-None-Match` / `If-Modified-Since` on the wire. Empty context leaves the
-  GET unconditional. Place after Bearer and before coalesce. Recommended stack
-  (outermost first): Logger → Retry → Timeout → Bearer → Conditional. Default
-  client middleware list stays Timeout-only.
+  `HttpBytesContext.etag` and/or `lastModified` to send `If-None-Match` /
+  `If-Modified-Since`. Empty context keeps an unconditional GET. Place after
+  Bearer and before coalesce. Recommended order (outermost first): Logger →
+  Retry → Timeout → Bearer → Conditional. Default client stack stays
+  Timeout-only.
+- **CHANGED**: `ImageBytesRequest.cacheKey` sets durable cache identity and
+  HTTP coalesce identity (`HttpBytesContext.identityOverride`). Headers still
+  go on the wire. If the request also carries `Authorization`, audible
+  diagnostics emit `cache_key_authorization` at debug level.
+- **ADDED**: `ImageBytesLogLevel.debug` and
+  `ImageBytesLogOp.cacheKeyAuthorization`.
+- **ADDED**: `ImageBytesRequest.skipCache`. When true, resolve seeds
+  `CacheContext.skipCache` so `SkipCacheMiddleware` returns a miss and skips
+  the write. Needs `MiddlewareImageBytesCache` with that middleware (or a host
+  equivalent). Plain stores ignore the flag. HTTP still runs.
+- **CHANGED**: `ImageBytesResolver` calls `HttpBytesClient.send` with
+  `HttpBytesRequest`. Typed `HttpBytesException` failures come from that path.
+  `getBytes` accepts an optional `context` map (same slots as `send`).
 
 ## 0.2.0
 

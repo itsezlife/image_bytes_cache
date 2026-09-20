@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:image_bytes_cache/src/cache/cache_middleware.dart';
+import 'package:image_bytes_cache/src/cache/middlewares/skip_cache_middleware.dart';
 import 'package:image_bytes_cache/src/http/http_bytes_client.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 import 'package:image_bytes_cache/src/image_bytes_diagnostics.dart';
@@ -324,6 +326,136 @@ void main() {
         body,
       );
       expect(hits, 1);
+    });
+
+    test('explicit cacheKey coalesces concurrent GETs despite different Authorization', () async {
+      var hits = 0;
+      final release = Completer<void>();
+      final body = Uint8List.fromList([2, 2]);
+      final client = HttpBytesClient(
+        client: MockClient((_) async {
+          hits++;
+          await release.future;
+          return http.Response.bytes(body, 200);
+        }),
+      );
+      addTearDown(client.close);
+
+      final resolver = ImageBytesResolver(
+        cache: MemoryImageBytesCache(),
+        client: client,
+      );
+      const key = ImageCacheKey('host_override_key');
+      const url = 'https://cdn.example.com/a.svg';
+
+      final a = resolver.resolve(
+        const ImageBytesRequest(
+          url: url,
+          headers: {'Authorization': 'Bearer a'},
+          cacheKey: key,
+        ),
+      );
+      final b = resolver.resolve(
+        const ImageBytesRequest(
+          url: url,
+          headers: {'Authorization': 'Bearer b'},
+          cacheKey: key,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      release.complete();
+
+      final results = await (a, b).wait;
+      expect(results.$1, body);
+      expect(results.$2, body);
+      expect(hits, 1);
+    });
+
+    test('cacheKey + Authorization reports debug diagnostic', () async {
+      final body = Uint8List.fromList([1]);
+      final client = HttpBytesClient(
+        client: MockClient((_) async => http.Response.bytes(body, 200)),
+      );
+      addTearDown(client.close);
+
+      final events = <ImageBytesLogEvent>[];
+      final resolver = ImageBytesResolver(
+        cache: MemoryImageBytesCache(),
+        client: client,
+        diagnostics: ImageBytesDiagnostics.onEvent(events.add),
+      );
+
+      await resolver.resolve(
+        const ImageBytesRequest(
+          url: 'https://cdn.example.com/diag.svg',
+          headers: {'Authorization': 'Bearer x'},
+          cacheKey: ImageCacheKey('override'),
+        ),
+      );
+
+      expect(
+        events,
+        contains(
+          isA<ImageBytesLogEvent>()
+              .having((e) => e.op, 'op', ImageBytesLogOp.cacheKeyAuthorization)
+              .having((e) => e.level, 'level', ImageBytesLogLevel.debug),
+        ),
+      );
+    });
+
+    test('skipCache seeds SkipCacheMiddleware — miss and no write-through', () async {
+      final inner = MemoryImageBytesCache();
+      const url = 'https://cdn.example.com/skip.svg';
+      final key = ImageCacheKey.fromUrl(url);
+      await inner.write(key, Uint8List.fromList([1, 2, 3]));
+
+      final cache = MiddlewareImageBytesCache(
+        inner: inner,
+        middlewares: <CacheMiddleware>[const SkipCacheMiddleware()],
+      );
+      var hits = 0;
+      final client = HttpBytesClient(
+        client: MockClient((_) async {
+          hits++;
+          return http.Response.bytes(Uint8List.fromList([9]), 200);
+        }),
+      );
+      addTearDown(client.close);
+
+      final resolver = ImageBytesResolver(cache: cache, client: client);
+      final bytes = await resolver.resolve(
+        const ImageBytesRequest(url: url, skipCache: true),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(bytes, Uint8List.fromList([9]));
+      expect(hits, 1);
+      expect(await inner.read(key), Uint8List.fromList([1, 2, 3]));
+    });
+
+    test('typed HttpBytesException from send propagates', () async {
+      final client = HttpBytesClient(
+        client: MockClient((_) async => http.Response('gone', 404)),
+      );
+      addTearDown(client.close);
+
+      final resolver = ImageBytesResolver(
+        cache: MemoryImageBytesCache(),
+        client: client,
+      );
+
+      await expectLater(
+        resolver.resolve(
+          const ImageBytesRequest(url: 'https://cdn.example.com/missing.svg'),
+        ),
+        throwsA(
+          isA<HttpBytesException$Request>().having(
+            (e) => e.statusCode,
+            'statusCode',
+            404,
+          ),
+        ),
+      );
     });
   });
 

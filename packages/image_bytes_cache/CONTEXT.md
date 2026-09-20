@@ -24,7 +24,8 @@ equivalents) are excluded from the fingerprint so local validators stay
 wire-only. Fingerprint material is length-prefixed (not a `url|headers` join).
 Distinct URLs that share a basename do not collide. Relative and absolute forms
 of the same resource share one key. Explicit `ImageBytesRequest.cacheKey` is a
-full identity escape hatch: headers still go on the wire but are not folded in.
+full identity override for durable and coalesce: headers still go on
+the wire but are not folded in.
 _Avoid_: basename-only disk keys, header casing as identity, delimiter joins
 for coalesce/fingerprint, folding conditionals into identity, assuming override
 keys fold Authorization
@@ -70,30 +71,35 @@ zero or negative capacity caps
 
 **ImageBytesResolver** / **ImageBytesRequest**:
 Resolve ladder: cache read → network on miss → fire-and-forget write-through.
-Empty cached payloads count as a miss. Empty durable writes are not retained
-(evict). Write-through failures do not fail paint; throwing diagnostics
-`onEvent` is swallowed so it cannot become an unhandled async error.
-Resolve remains a single [Future] of the full body — not a public byte stream.
-Optional bytes-progress reporting (cumulative / optional total) may ride with
-the request so paint adapters can surface honest download progress; cache hits
-do not invent mid-flight percents.
+Uses `HttpBytesClient.send` (`HttpBytesRequest`); typed HTTP errors propagate.
+`cacheKey` sets durable and coalesce identity (`HttpBytesContext.identityOverride`).
+`cacheKey` plus request `Authorization` emits a debug diagnostic.
+`skipCache` sets `CacheContext.skipCache` when the store is a middleware wrapper
+with Skip-cache. Empty cached payloads count as a miss. Empty durable writes
+are not retained (evict). Write-through failures do not fail paint; throwing
+diagnostics `onEvent` is swallowed so it cannot become an unhandled async
+error. Resolve remains a single [Future] of the full body, not a public byte
+stream. Optional bytes-progress reporting (cumulative / optional total) may
+ride with the request so paint adapters can surface honest download progress;
+cache hits do not invent mid-flight percents.
 _Avoid_: failing resolve when durable write fails; sticky empty capacity waste;
 replacing resolve with a streaming public API for progress alone; fake
-progress events that are not tied to real fetch bytes
+progress events that are not tied to real fetch bytes; assuming `skipCache`
+works without Skip-cache middleware
 
 **HttpBytesClient**:
-HTTP GET with concurrency pool and in-flight coalesce by `ImageCacheKey` identity
-(canonical URL + canonical headers; conditionals excluded). Default success is
-2xx or 304 Not Modified (empty/ignored body; empty-body-as-`$Internal` only for
-non-304). Opt-in [HttpBytesConditionalMiddleware] maps context `etag` /
-`lastModified` to `If-None-Match` / `If-Modified-Since` (after Bearer, before
-coalesce; recommended stack Logger → Retry → Timeout → Bearer → Conditional).
-Timeout after pool slot via `AbortableRequest` (aborts when the client
-honors it). Pool wait for a slot is intentionally unbounded. When a progress
-sink is supplied, reports cumulative bytes as the response body is read (total
-when the response provides it). Process-wide `configure` / `shared` /
-`resetShared` mirror the cache facade so hosts can inject a custom `http.Client`
-once at bootstrap.
+HTTP GET with concurrency pool and in-flight coalesce by `ImageCacheKey`
+(canonical URL + canonical headers; conditionals excluded), or by
+`HttpBytesContext.identityOverride` when set. Default success is 2xx or 304 Not
+Modified (empty/ignored body; empty-body-as-`$Internal` only for non-304).
+Opt-in [HttpBytesConditionalMiddleware] maps context `etag` / `lastModified` to
+`If-None-Match` / `If-Modified-Since` (after Bearer, before coalesce;
+recommended stack Logger → Retry → Timeout → Bearer → Conditional). Timeout
+after pool slot via `AbortableRequest` (aborts when the client honors it). Pool
+wait for a slot is intentionally unbounded. When a progress sink is supplied,
+reports cumulative bytes as the response body is read (total when the response
+provides it). Process-wide `configure` / `shared` / `resetShared` mirror the
+cache facade so hosts can inject a custom `http.Client` once at bootstrap.
 _Avoid_: homemade download queues; Mutex for N-way downloads; `url|headers`
 string joins for coalesce; assuming timeout covers pool queue time; treating 304
 as `$Request` or empty-body `$Internal`; folding validators into identity;
@@ -101,8 +107,9 @@ synthetic chunk percents after the body is already fully buffered
 
 **ImageBytesDiagnostics**:
 Soft-failure policy (silent / developer log / onEvent). Process-wide `current`
-set by open/configure. Covers write-through, index wipe, and degraded open.
-`onEvent` must not throw; throws are swallowed in `report`.
+set by open/configure. Covers write-through, index wipe, degraded open, and
+`cache_key_authorization` (debug) when `cacheKey` is set with request
+`Authorization`. `onEvent` must not throw; throws are swallowed in `report`.
 Package does not depend on a product logger.
 _Avoid_: `package:l` inside the ladder; `enableLogging` bool soup; throwing
 host callbacks that escalate soft failures

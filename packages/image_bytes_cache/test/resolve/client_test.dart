@@ -376,6 +376,38 @@ void main() {
       expect(hits, 2);
     });
 
+    test('identityOverride coalesces despite different Authorization headers', () async {
+      var hits = 0;
+      final release = Completer<void>();
+      final client = HttpBytesClient(
+        client: MockClient((_) async {
+          hits++;
+          await release.future;
+          return http.Response.bytes(Uint8List.fromList([3]), 200);
+        }),
+      );
+      addTearDown(client.close);
+
+      final url = Uri.parse('https://cdn.example.com/override.svg');
+      const override = ImageCacheKey('host_identity');
+      final a = client.getBytes(
+        url,
+        headers: const {'Authorization': 'Bearer a'},
+        context: HttpBytesContext.empty()..identityOverride = override,
+      );
+      final b = client.getBytes(
+        url,
+        headers: const {'Authorization': 'Bearer b'},
+        context: HttpBytesContext.empty()..identityOverride = override,
+      );
+      release.complete();
+
+      final results = await (a, b).wait;
+      expect(results.$1, Uint8List.fromList([3]));
+      expect(results.$2, Uint8List.fromList([3]));
+      expect(hits, 1);
+    });
+
     test('coalesces when only conditional headers differ', () async {
       var hits = 0;
       final release = Completer<void>();

@@ -111,12 +111,14 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
   identity; `Authorization` and other representation headers still participate.
 - Coalesce and durable identity use `ImageCacheKey` (length-prefixed fingerprint
   material; no `url|headers` join). Relative vs absolute `Uri.base` equivalents
-  share one key; explicit `cacheKey` is full identity (headers on wire only).
-  In-flight coalesce keys are **post-middleware** (Bearer `Authorization`
-  participates; conditionals do not); durable resolve keys still use request
-  headers / `cacheKey`. Opt-in [HttpBytesConditionalMiddleware] seeds
-  `If-None-Match` / `If-Modified-Since` from `HttpBytesContext.etag` /
-  `lastModified` — place after Bearer, before coalesce.
+  share one key. Explicit `cacheKey` is full identity for durable and coalesce
+  (`HttpBytesContext.identityOverride`; headers on wire only). In-flight
+  coalesce keys are post-middleware (Bearer `Authorization` participates;
+  conditionals do not) unless identity override is set. Opt-in
+  [HttpBytesConditionalMiddleware] seeds `If-None-Match` / `If-Modified-Since`
+  from `HttpBytesContext.etag` / `lastModified`. Place after Bearer, before
+  coalesce. `ImageBytesRequest.skipCache` sets cache Skip-cache via
+  `CacheContext` when the store is a middleware wrapper.
 - Distinct URLs that share a basename must not collide on disk (fingerprint).
 - VM store under app **cache** root, not documents. Web ignores `directory`.
 - `MemoryImageBytesCache` / `NoOpImageBytesCache` stay usable after `close`;

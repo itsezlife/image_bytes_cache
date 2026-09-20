@@ -68,8 +68,8 @@ extension type CacheMiddlewareWrapper._(CacheMiddleware _fn) {
 ///
 /// Public [IImageBytesCache] methods on the wrapper start from
 /// [CacheContext.empty]. Seed [skipCache] (or other policy keys) via
-/// [MiddlewareImageBytesCache.execute] so [SkipCacheMiddleware]
-/// and later ladder plumbing share one story.
+/// [MiddlewareImageBytesCache.execute]. [ImageBytesResolver] does this when
+/// [ImageBytesRequest.skipCache] is true.
 extension type CacheContext(Map<String, Object?> _map) implements Map<String, Object?> {
   /// Fresh map for a new dispatch.
   factory CacheContext.empty() => CacheContext(<String, Object?>{});

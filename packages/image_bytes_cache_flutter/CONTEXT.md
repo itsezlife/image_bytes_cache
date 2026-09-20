@@ -21,15 +21,18 @@ one mega-widget that owns both SVG and Flutter decode lifecycles
 **CachedNetworkBytesImageProvider**:
 [ImageProvider] that resolves remote image **bytes** through
 [IImageBytesResolver], then decodes with Flutter's image pipeline (whatever
-codecs the engine accepts — PNG, JPEG, WebP, multi-frame GIF, and siblings).
+codecs the engine accepts: PNG, JPEG, WebP, multi-frame GIF, and siblings).
 Flutter [ImageCache] identity is [ImageCacheKey] plus scale and optional
-decode size; durable store identity stays [ImageCacheKey] alone. Optional
+decode size; durable store identity stays [ImageCacheKey] alone. The public
+`cacheKey` getter is always `ImageCacheKey.fromUrl(url, headers)`. The
+provider does not take an [ImageBytesRequest.cacheKey] override. Optional
 injected resolver for tests. Optional [errorListener] for soft resolve /
 empty-body / decode failures when the host has no [Image.errorBuilder].
 Does not mirror bodies into [PageStorage].
 _Avoid_: opening files/sockets; forking the durable key by decode size;
 PageStorage-of-bytes on this path; inventing a sealed load state beside
-[ImageStream]; treating [errorListener] as a product logger
+[ImageStream]; treating [errorListener] as a product logger; treating the
+provider `cacheKey` getter as a request override
 
 **CachedNetworkBytesImage**:
 Thin [Image] convenience over [CachedNetworkBytesImageProvider]. Call-site

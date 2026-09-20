@@ -55,8 +55,8 @@ on this path).
 | `ImageBytesCache.open` (VM) | Real temp directory round-trip, batch commit after close/reopen, orphan reclaim, degraded open |
 | `ImageBytesCache.open` (web / Chrome) | Size routing, reopen, reclaim on Cache and OPFS |
 | `ImageBytesBlobStore$File$VM` | Worker death fails pending RPC (timeout-bounded); respawn after death; exclusive gate not stuck |
-| `ImageBytesResolver` | Hit skips network; empty cache misses; write-through failure (incl. index commit throw) still returns bytes; throwing `onEvent` is not unhandled |
-| `HttpBytesClient` | Coalesce, pool, non-2xx, 304 success (empty/ignored body), empty body on non-304, timeout (+ abort when client honors), close, configure / resetShared |
+| `ImageBytesResolver` | Hit skips network; empty cache misses; write-through failure (incl. index commit throw) still returns bytes; throwing `onEvent` is not unhandled; `cacheKey` overrides durable + coalesce; override + Authorization debug diagnostic; `skipCache` end-to-end with Skip-cache middleware; typed `HttpBytesException` from send |
+| `HttpBytesClient` | Coalesce, pool, non-2xx, 304 success (empty/ignored body), empty body on non-304, timeout (+ abort when client honors), close, configure / resetShared; `identityOverride` coalesce |
 | `ImageCacheKey` | Canonical headers; conditional headers excluded; distinct URLs with same basename |
 
 Prefer fakes for `IImageBytesIndex` / `IImageBytesBlobStore` when testing the
