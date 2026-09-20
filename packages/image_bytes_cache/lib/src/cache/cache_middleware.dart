@@ -116,18 +116,21 @@ final class CacheOperation$Read extends CacheOperation {
 
 /// Write [bytes] under [key].
 ///
-/// Bytes only. Empty [bytes] still means eviction at the store, matching
-/// [IImageBytesCache.write]. HTTP cache fields are not part of this op until
-/// a store knows how to keep [ImageHttpCacheMeta].
+/// Empty [bytes] still means eviction at the store, same as
+/// [IImageBytesCache.write]. Pass [httpCacheMeta] to keep validators with the
+/// body. Null clears prior meta for [key] on stores that keep it.
 final class CacheOperation$Write extends CacheOperation {
   /// Creates a write of [bytes] under [key].
-  const CacheOperation$Write(this.key, this.bytes);
+  const CacheOperation$Write(this.key, this.bytes, {this.httpCacheMeta});
 
   /// Entry identity.
   final ImageCacheKey key;
 
   /// Payload. Empty lists evict [key] instead of retaining a zero-length row.
   final Uint8List bytes;
+
+  /// HTTP validators / freshness to store with [bytes], or null to clear them.
+  final ImageHttpCacheMeta? httpCacheMeta;
 }
 
 /// Delete [key] if present.
@@ -202,13 +205,12 @@ final class CacheOperationResult$Close extends CacheOperationResult {
 
 /// What a cache read returns inside the middleware chain.
 ///
-/// [IImageBytesCache.read] on [MiddlewareImageBytesCache] keeps returning
-/// [Uint8List]? by taking [bytes] and dropping the rest. The ladder and
-/// observing middleware need the optional timestamps and [httpCacheMeta]
-/// without forcing every host call site to care.
+/// [MiddlewareImageBytesCache.read] still unwraps to [Uint8List]?: it takes
+/// [bytes] and drops the rest. Use [MiddlewareImageBytesCache.execute] with
+/// [CacheOperation$Read] when you need timestamps or [httpCacheMeta].
 @immutable
 final class CacheReadHit {
-  /// Non-empty [bytes] required. Stores scrub empty rows to miss first.
+  /// [bytes] must be non-empty. Empty rows are scrubbed to a miss first.
   const CacheReadHit({
     required this.bytes,
     this.writtenAt,
@@ -225,54 +227,8 @@ final class CacheReadHit {
   /// Soft LRU access time when the store tracked it.
   final DateTime? accessedAt;
 
-  /// Validators / freshness. Null means the entry predates HTTP cache meta
-  /// or the store has none yet.
+  /// Validators / freshness. Null when the store had none for this key.
   final ImageHttpCacheMeta? httpCacheMeta;
-}
-
-/// HTTP validators and freshness for one cached body.
-///
-/// Do not confuse this with [ImageBytesRetention] or [ImageBytesRecord]
-/// timestamps. Those drive capacity and age eviction. This type is about
-/// ETag / Last-Modified / Cache-Control style revalidation.
-///
-/// Every field is optional. Missing fields are a pre-ETag entry, not an
-/// error. Index codecs that round-trip these fields land separately; rich
-/// hits already use this shape in memory.
-@immutable
-final class ImageHttpCacheMeta {
-  /// All fields default to null.
-  const ImageHttpCacheMeta({
-    this.etag,
-    this.lastModified,
-    this.date,
-    this.expires,
-    this.cacheControl,
-    this.age,
-    this.lastValidatedAt,
-  });
-
-  /// `ETag` value, quotes included when the origin sent them.
-  final String? etag;
-
-  /// Raw `Last-Modified` header.
-  final String? lastModified;
-
-  /// Parsed `Date` when known.
-  final DateTime? date;
-
-  /// Parsed `Expires` when known.
-  final DateTime? expires;
-
-  /// Raw `Cache-Control`, or a lightly normalized copy of it.
-  final String? cacheControl;
-
-  /// `Age` as a duration when known.
-  final Duration? age;
-
-  /// When this entry was last confirmed still current after a 200 write or a
-  /// 304.
-  final DateTime? lastValidatedAt;
 }
 
 // --- Wrapper store ---
@@ -326,8 +282,8 @@ final class MiddlewareImageBytesCache implements IImageBytesCache {
 
   /// Cached bytes for [key], or null on miss.
   ///
-  /// Drops [CacheReadHit] meta. Use [execute] with [CacheOperation$Read] when
-  /// you need [CacheReadHit.httpCacheMeta] or timestamps.
+  /// Drops [CacheReadHit] meta. Call [execute] with [CacheOperation$Read] for
+  /// timestamps or [CacheReadHit.httpCacheMeta].
   @override
   Future<Uint8List?> read(ImageCacheKey key) async {
     final result = await execute(CacheOperation$Read(key));
@@ -343,8 +299,14 @@ final class MiddlewareImageBytesCache implements IImageBytesCache {
 
   /// Writes [bytes] under [key] as [CacheOperation$Write].
   @override
-  Future<void> write(ImageCacheKey key, Uint8List bytes) async {
-    final result = await execute(CacheOperation$Write(key, bytes));
+  Future<void> write(
+    ImageCacheKey key,
+    Uint8List bytes, {
+    ImageHttpCacheMeta? httpCacheMeta,
+  }) async {
+    final result = await execute(
+      CacheOperation$Write(key, bytes, httpCacheMeta: httpCacheMeta),
+    );
     switch (result) {
       case CacheOperationResult$Write():
         return;
@@ -404,13 +366,24 @@ final class MiddlewareImageBytesCache implements IImageBytesCache {
     switch (operation) {
       case CacheOperation$Read(:final key):
         return CacheOperationResult$Read(
-          switch (await store.read(key)) {
-            final bytes? => CacheReadHit(bytes: bytes),
-            null => null,
+          switch (store) {
+            final IImageBytesRichCache rich => switch (await rich.readRich(key)) {
+              final hit? => CacheReadHit(
+                bytes: hit.bytes,
+                writtenAt: hit.writtenAt,
+                accessedAt: hit.accessedAt,
+                httpCacheMeta: hit.httpCacheMeta,
+              ),
+              null => null,
+            },
+            _ => switch (await store.read(key)) {
+              final bytes? => CacheReadHit(bytes: bytes),
+              null => null,
+            },
           },
         );
-      case CacheOperation$Write(:final key, :final bytes):
-        await store.write(key, bytes);
+      case CacheOperation$Write(:final key, :final bytes, :final httpCacheMeta):
+        await store.write(key, bytes, httpCacheMeta: httpCacheMeta);
         return const CacheOperationResult$Write();
       case CacheOperation$Evict(:final key):
         await store.evict(key);

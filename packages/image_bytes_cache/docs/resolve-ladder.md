@@ -77,22 +77,24 @@ store.
 
 ## Cache middleware
 
-`MiddlewareImageBytesCache` implements `IImageBytesCache` and dispatches every
-call through a `CacheMiddleware` chain into an inner store. Sealed `CacheOperation` / `CacheOperationResult` cover
-read, write, evict, prune, and close — **never reclaim** (orphan reclaim stays
-on `IndexedImageBytesCache` under its exclusive gate).
+`MiddlewareImageBytesCache` implements `IImageBytesCache` and runs every call
+through a `CacheMiddleware` chain into an inner store. Sealed `CacheOperation` /
+`CacheOperationResult` cover read, write, evict, prune, and close. There is no
+reclaim op. Orphan reclaim stays on `IndexedImageBytesCache` under its exclusive
+gate.
 
-Internal reads can carry a `CacheReadHit` (bytes + optional retention
-timestamps + optional `ImageHttpCacheMeta`). Public `read` still returns
-`Uint8List?` by unwrapping the hit. Use `execute` when a caller needs the rich
-result or a shared `CacheContext`.
+A chain read yields `CacheReadHit`: bytes, optional retention timestamps, and
+optional `ImageHttpCacheMeta`. Public `read` unwraps to `Uint8List?`. Call
+`execute` for the full hit or a shared `CacheContext`. Stores that implement
+`IImageBytesRichCache` fill timestamps and HTTP meta on the terminal read;
+`write` accepts optional `httpCacheMeta` the same way.
 
 Opt-in product middlewares (list outermost first):
 
 | Middleware | Role |
 | --- | --- |
 | [ImageBytesCacheLoggerMiddleware$Developer] | Observes hit/miss/evict/prune via `developer.log` (`image_bytes_cache`); no durable IO; place outermost |
-| [ImageBytesSkipCacheMiddleware] | When `CacheContext.skipCache` (or `shouldSkip`) is true: read → miss, write → no-op; evict/prune/close still forward |
+| [ImageBytesSkipCacheMiddleware] | When `CacheContext.skipCache` (or `shouldSkip`) is true: read returns miss, write is a no-op; evict/prune/close still forward |
 
 Seed `CacheContext.skipCache` through `execute` (resolver plumbing will set it
 end-to-end). Public `read` / `write` on the wrapper use an empty context, so

@@ -55,6 +55,32 @@ void main() {
       );
     });
 
+    test('Memory round-trips HTTP cache meta through execute; public read stays bytes', () async {
+      final inner = MemoryImageBytesCache();
+      final cache = MiddlewareImageBytesCache(inner: inner);
+      const key = ImageCacheKey('logo');
+      final bytes = Uint8List.fromList([1, 2, 3]);
+      const meta = ImageHttpCacheMeta(
+        etag: '"v1"',
+        cacheControl: 'max-age=60',
+      );
+
+      await cache.execute(CacheOperation$Write(key, bytes, httpCacheMeta: meta));
+
+      expect(await cache.read(key), bytes);
+      expect(await inner.read(key), bytes);
+
+      final rich = await cache.execute(const CacheOperation$Read(key));
+      expect(
+        rich,
+        isA<CacheOperationResult$Read>()
+            .having((r) => r.hit?.bytes, 'bytes', bytes)
+            .having((r) => r.hit?.httpCacheMeta?.etag, 'etag', '"v1"')
+            .having((r) => r.hit?.httpCacheMeta?.cacheControl, 'cacheControl', 'max-age=60')
+            .having((r) => r.hit?.writtenAt, 'writtenAt', isNotNull),
+      );
+    });
+
     test('forwards evict, prune, and close to the inner store', () async {
       final inner = MemoryImageBytesCache(
         retention: const ImageBytesRetention.maxAge(Duration(hours: 1)),

@@ -1,3 +1,5 @@
+// ignore_for_file: one_member_abstracts
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -275,7 +277,126 @@ final class ImageBytesPruneReport {
   final int freedBytes;
 }
 
-/// Metadata for one stored entry (timestamps and size, not the bytes).
+/// HTTP validators and freshness for one cached body.
+///
+/// Separate from [ImageBytesRetention] and from [ImageBytesRecord.writtenAt] /
+/// [ImageBytesRecord.accessedAt]. Retention evicts by age and capacity. This
+/// type is what a later revalidation path needs: ETag, Last-Modified,
+/// Cache-Control, and friends.
+///
+/// Every field is optional. A row with all nulls (or a null [ImageBytesRecord.httpCacheMeta])
+/// is a pre-ETag entry, not a decode error. The durable index codec keeps these
+/// fields additive on `v:1`. [ImageCacheKey] never hashes them.
+@immutable
+final class ImageHttpCacheMeta {
+  /// All fields default to null.
+  const ImageHttpCacheMeta({
+    this.etag,
+    this.lastModified,
+    this.date,
+    this.expires,
+    this.cacheControl,
+    this.age,
+    this.lastValidatedAt,
+  });
+
+  /// `ETag` response value. Keeps surrounding quotes when the origin sent them.
+  final String? etag;
+
+  /// Raw `Last-Modified` header string.
+  final String? lastModified;
+
+  /// Parsed `Date` header, when the store recorded one.
+  final DateTime? date;
+
+  /// Parsed `Expires` header, when the store recorded one.
+  final DateTime? expires;
+
+  /// Raw `Cache-Control` string, or a lightly normalized copy of it.
+  final String? cacheControl;
+
+  /// `Age` header as a duration, when known.
+  final Duration? age;
+
+  /// Wall time of the last successful confirm: a 200 write-through or a 304.
+  final DateTime? lastValidatedAt;
+
+  /// True when every field is null. Encoders skip writing an empty `h` object.
+  bool get isEmpty =>
+      etag == null &&
+      lastModified == null &&
+      date == null &&
+      expires == null &&
+      cacheControl == null &&
+      age == null &&
+      lastValidatedAt == null;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ImageHttpCacheMeta &&
+          other.etag == etag &&
+          other.lastModified == lastModified &&
+          other.date == date &&
+          other.expires == expires &&
+          other.cacheControl == cacheControl &&
+          other.age == age &&
+          other.lastValidatedAt == lastValidatedAt;
+
+  @override
+  int get hashCode => Object.hash(
+    etag,
+    lastModified,
+    date,
+    expires,
+    cacheControl,
+    age,
+    lastValidatedAt,
+  );
+}
+
+/// Bytes plus retention timestamps and optional [ImageHttpCacheMeta].
+///
+/// [IImageBytesCache.read] still returns [Uint8List]?. Call
+/// [IImageBytesRichCache.readRich], or run a middleware read through
+/// `execute`, when you need the meta beside the body.
+@immutable
+final class ImageBytesRichHit {
+  /// [bytes] must be non-empty. Empty rows are scrubbed to a miss before this
+  /// type is built.
+  const ImageBytesRichHit({
+    required this.bytes,
+    this.writtenAt,
+    this.accessedAt,
+    this.httpCacheMeta,
+  });
+
+  /// Payload. Never empty on a successful hit.
+  final Uint8List bytes;
+
+  /// Last write time when the store tracked it.
+  final DateTime? writtenAt;
+
+  /// Soft LRU access time when the store tracked it.
+  final DateTime? accessedAt;
+
+  /// Validators / freshness. Null when the row never stored any, including
+  /// older durable documents that predate these fields.
+  final ImageHttpCacheMeta? httpCacheMeta;
+}
+
+/// Optional rich-read half for stores that keep meta beside bytes.
+///
+/// [MemoryImageBytesCache] and [IndexedImageBytesCache] implement this.
+/// Middleware terminals call [readRich] when the inner store implements it.
+/// Hosts that only call [IImageBytesCache.read] never see this type.
+abstract interface class IImageBytesRichCache {
+  /// Same miss, TTL, and empty-scrub rules as [IImageBytesCache.read], plus
+  /// timestamps and [ImageHttpCacheMeta] when present.
+  Future<ImageBytesRichHit?> readRich(ImageCacheKey key);
+}
+
+/// Metadata for one stored entry: timestamps, size, optional HTTP cache meta.
 @immutable
 final class ImageBytesRecord {
   /// Builds a record for [key].
@@ -284,6 +405,7 @@ final class ImageBytesRecord {
     required this.writtenAt,
     required this.accessedAt,
     required this.byteLength,
+    this.httpCacheMeta,
   });
 
   /// Entry identity.
@@ -298,16 +420,24 @@ final class ImageBytesRecord {
   /// Payload length in bytes (used for [ImageBytesRetention.maxBytes]).
   final int byteLength;
 
+  /// HTTP validators / freshness for this body, or null for a pre-ETag row.
+  ///
+  /// Not part of [ImageCacheKey]. [ImageBytesRetention] still looks only at
+  /// [writtenAt], [accessedAt], and [byteLength].
+  final ImageHttpCacheMeta? httpCacheMeta;
+
   /// Copy with selected fields replaced.
   ImageBytesRecord copyWith({
     DateTime? writtenAt,
     DateTime? accessedAt,
     int? byteLength,
+    ImageHttpCacheMeta? httpCacheMeta,
   }) => ImageBytesRecord(
     key: key,
     writtenAt: writtenAt ?? this.writtenAt,
     accessedAt: accessedAt ?? this.accessedAt,
     byteLength: byteLength ?? this.byteLength,
+    httpCacheMeta: httpCacheMeta ?? this.httpCacheMeta,
   );
 }
 
@@ -382,7 +512,17 @@ abstract interface class IImageBytesCache {
   /// when present. An empty durable row would still count toward
   /// [ImageBytesRetention.maxEntries] while never painting, so hosts must not
   /// be able to stick zero-length capacity waste through this API.
-  Future<void> write(ImageCacheKey key, Uint8List bytes);
+  ///
+  /// Pass [httpCacheMeta] when the store should keep validators next to the
+  /// body ([MemoryImageBytesCache], [IndexedImageBytesCache]). Null (the
+  /// default) clears any previous meta for [key]. That matches a bytes-only
+  /// replace: the old ETag belonged to the old body. [ImageCacheKey] is
+  /// unchanged either way.
+  Future<void> write(
+    ImageCacheKey key,
+    Uint8List bytes, {
+    ImageHttpCacheMeta? httpCacheMeta,
+  });
 
   /// Deletes one key if present (index and payload when composed).
   Future<void> evict(ImageCacheKey key);
@@ -445,7 +585,11 @@ abstract interface class IImageBytesCache {
 /// reports via diagnostics without failing a successful network resolve.
 ///
 /// After [close], further operations throw [StateError].
-final class IndexedImageBytesCache implements IImageBytesCache {
+///
+/// Also implements [IImageBytesRichCache]: [readRich] returns the same hit or
+/// miss as [read], and attaches [ImageBytesRecord] timestamps plus
+/// [ImageHttpCacheMeta] when the index row has them.
+final class IndexedImageBytesCache implements IImageBytesCache, IImageBytesRichCache {
   /// Wires [index] and [blobs] under [retention].
   ///
   /// [clock] is injectable for tests (defaults to UTC now).
@@ -490,7 +634,12 @@ final class IndexedImageBytesCache implements IImageBytesCache {
   /// Concurrent with other pure reads. TTL expiry and index-without-blob
   /// cleanup upgrade to the exclusive mutate path.
   @override
-  Future<Uint8List?> read(ImageCacheKey key) async {
+  Future<Uint8List?> read(ImageCacheKey key) async => (await readRich(key))?.bytes;
+
+  /// Same probe as [read], then retention timestamps and [ImageHttpCacheMeta]
+  /// from the index row when the hit succeeds.
+  @override
+  Future<ImageBytesRichHit?> readRich(ImageCacheKey key) async {
     final probe = await _runShared(() async {
       _ensureOpen();
       final record = await _index.get(key);
@@ -507,11 +656,27 @@ final class IndexedImageBytesCache implements IImageBytesCache {
       if (bytes.isEmpty) return const _ReadProbe.needsDelete();
 
       _pendingAccess[key] = now;
-      return _ReadProbe.hit(bytes);
+      return _ReadProbe.hit(
+        bytes,
+        writtenAt: record.writtenAt,
+        accessedAt: now,
+        httpCacheMeta: record.httpCacheMeta,
+      );
     });
 
     return switch (probe) {
-      _ReadProbeHit(:final bytes) => bytes,
+      _ReadProbeHit(
+        :final bytes,
+        :final writtenAt,
+        :final accessedAt,
+        :final httpCacheMeta,
+      ) =>
+        ImageBytesRichHit(
+          bytes: bytes,
+          writtenAt: writtenAt,
+          accessedAt: accessedAt,
+          httpCacheMeta: httpCacheMeta,
+        ),
       _ReadProbeMiss() => null,
       _ReadProbeNeedsDelete() => _runExclusive(() async {
         _ensureOpen();
@@ -526,7 +691,7 @@ final class IndexedImageBytesCache implements IImageBytesCache {
           null => false,
         };
         if (!expired) {
-          return _finishSharedHit(key, now, preEpoch, record.byteLength);
+          return _finishSharedRichHit(key, now, preEpoch, record);
         }
         await _deleteBoth(key);
         await _commitOrRollback(preEpoch);
@@ -539,26 +704,39 @@ final class IndexedImageBytesCache implements IImageBytesCache {
         final record = await _index.get(key);
         if (record == null) return null;
         final bytes = await _blobs.read(key, knownByteLength: record.byteLength);
-        if (bytes != null) {
-          _pendingAccess[key] = _clock();
-          return bytes;
+        switch (bytes) {
+          case final b? when b.isNotEmpty:
+            final now = _clock();
+            _pendingAccess[key] = now;
+            return ImageBytesRichHit(
+              bytes: b,
+              writtenAt: record.writtenAt,
+              accessedAt: now,
+              httpCacheMeta: record.httpCacheMeta,
+            );
+          case final b? when b.isEmpty:
+            _pendingAccess.remove(key);
+            await _deleteBoth(key);
+            await _commitOrRollback(preEpoch);
+            return null;
+          case null:
+            _pendingAccess.remove(key);
+            await _index.delete(key);
+            await _commitOrRollback(preEpoch);
+            return null;
         }
-        _pendingAccess.remove(key);
-        await _index.delete(key);
-        await _commitOrRollback(preEpoch);
-        return null;
       }),
     };
   }
 
   /// Blob hit after meta was already confirmed present and not expired.
-  Future<Uint8List?> _finishSharedHit(
+  Future<ImageBytesRichHit?> _finishSharedRichHit(
     ImageCacheKey key,
     DateTime now,
     Map<ImageCacheKey, ImageBytesRecord> preEpoch,
-    int knownByteLength,
+    ImageBytesRecord record,
   ) async {
-    final bytes = await _blobs.read(key, knownByteLength: knownByteLength);
+    final bytes = await _blobs.read(key, knownByteLength: record.byteLength);
     if (bytes == null || bytes.isEmpty) {
       _pendingAccess.remove(key);
       await _deleteBoth(key);
@@ -566,15 +744,27 @@ final class IndexedImageBytesCache implements IImageBytesCache {
       return null;
     }
     _pendingAccess[key] = now;
-    return bytes;
+    return ImageBytesRichHit(
+      bytes: bytes,
+      writtenAt: record.writtenAt,
+      accessedAt: now,
+      httpCacheMeta: record.httpCacheMeta,
+    );
   }
 
-  /// Writes payload + RAM meta, flushes soft access, trims, commits once.
+  /// Writes payload and RAM meta, flushes soft access, trims, commits once.
   ///
   /// Empty [bytes] evict [key] instead of storing a zero-length row that would
   /// still occupy an entry slot under capacity retention.
+  ///
+  /// [httpCacheMeta] is written onto the index row. Null clears prior HTTP meta
+  /// for [key] (bytes-only replace of a body that may have had validators).
   @override
-  Future<void> write(ImageCacheKey key, Uint8List bytes) {
+  Future<void> write(
+    ImageCacheKey key,
+    Uint8List bytes, {
+    ImageHttpCacheMeta? httpCacheMeta,
+  }) {
     if (bytes.isEmpty) {
       return evict(key);
     }
@@ -590,6 +780,7 @@ final class IndexedImageBytesCache implements IImageBytesCache {
           writtenAt: now,
           accessedAt: now,
           byteLength: bytes.length,
+          httpCacheMeta: httpCacheMeta,
         ),
       );
       await _trimCapacity();
@@ -749,7 +940,8 @@ final class IndexedImageBytesCache implements IImageBytesCache {
       if (live == null ||
           live.writtenAt != value.writtenAt ||
           live.accessedAt != value.accessedAt ||
-          live.byteLength != value.byteLength) {
+          live.byteLength != value.byteLength ||
+          live.httpCacheMeta != value.httpCacheMeta) {
         await _index.put(value);
       }
     }
@@ -807,12 +999,17 @@ final class IndexedImageBytesCache implements IImageBytesCache {
   }
 }
 
-/// Outcome of a shared [IndexedImageBytesCache.read] probe before optional mutate.
+/// Outcome of a shared [IndexedImageBytesCache.readRich] probe before optional mutate.
 @immutable
 sealed class _ReadProbe {
   const _ReadProbe();
 
-  const factory _ReadProbe.hit(Uint8List bytes) = _ReadProbeHit;
+  const factory _ReadProbe.hit(
+    Uint8List bytes, {
+    required DateTime writtenAt,
+    required DateTime accessedAt,
+    ImageHttpCacheMeta? httpCacheMeta,
+  }) = _ReadProbeHit;
   const factory _ReadProbe.miss() = _ReadProbeMiss;
   const factory _ReadProbe.needsDelete() = _ReadProbeNeedsDelete;
   const factory _ReadProbe.needsIndexDelete() = _ReadProbeNeedsIndexDelete;
@@ -820,8 +1017,17 @@ sealed class _ReadProbe {
 
 @immutable
 final class _ReadProbeHit extends _ReadProbe {
-  const _ReadProbeHit(this.bytes);
+  const _ReadProbeHit(
+    this.bytes, {
+    required this.writtenAt,
+    required this.accessedAt,
+    this.httpCacheMeta,
+  });
+
   final Uint8List bytes;
+  final DateTime writtenAt;
+  final DateTime accessedAt;
+  final ImageHttpCacheMeta? httpCacheMeta;
 }
 
 @immutable
@@ -845,7 +1051,11 @@ DateTime _defaultClock() => DateTime.now().toUtc();
 ///
 /// Access times update on every [read] (cheap in memory). Prefer
 /// [IndexedImageBytesCache] for the process store.
-final class MemoryImageBytesCache implements IImageBytesCache {
+///
+/// Keeps optional [ImageHttpCacheMeta] in the same map entry as the bytes.
+/// [readRich] and a middleware `execute` read can return it without a durable
+/// index.
+final class MemoryImageBytesCache implements IImageBytesCache, IImageBytesRichCache {
   /// Creates an empty in-memory store.
   ///
   /// [clock] is injectable for tests (defaults to UTC now).
@@ -862,7 +1072,11 @@ final class MemoryImageBytesCache implements IImageBytesCache {
 
   /// Returns bytes or `null` if missing / past TTL / empty sticky payload.
   @override
-  Future<Uint8List?> read(ImageCacheKey key) async {
+  Future<Uint8List?> read(ImageCacheKey key) async => (await readRich(key))?.bytes;
+
+  /// Same miss rules as [read], plus timestamps and [ImageHttpCacheMeta].
+  @override
+  Future<ImageBytesRichHit?> readRich(ImageCacheKey key) async {
     if (_entries[key] case final entry?) {
       final now = _clock();
       if (retention.limits.maxAge case final maxAge? when now.difference(entry.writtenAt) > maxAge) {
@@ -875,7 +1089,12 @@ final class MemoryImageBytesCache implements IImageBytesCache {
       }
 
       entry.accessedAt = now;
-      return entry.bytes;
+      return ImageBytesRichHit(
+        bytes: entry.bytes,
+        writtenAt: entry.writtenAt,
+        accessedAt: entry.accessedAt,
+        httpCacheMeta: entry.httpCacheMeta,
+      );
     }
     return null;
   }
@@ -884,8 +1103,14 @@ final class MemoryImageBytesCache implements IImageBytesCache {
   ///
   /// Empty [bytes] evict [key] instead of retaining a zero-length entry that
   /// still consumes [ImageBytesRetention.maxEntries] capacity.
+  ///
+  /// [httpCacheMeta] lives in the entry for [readRich]. Null clears prior meta.
   @override
-  Future<void> write(ImageCacheKey key, Uint8List bytes) async {
+  Future<void> write(
+    ImageCacheKey key,
+    Uint8List bytes, {
+    ImageHttpCacheMeta? httpCacheMeta,
+  }) async {
     if (bytes.isEmpty) {
       _entries.remove(key);
       return;
@@ -895,6 +1120,7 @@ final class MemoryImageBytesCache implements IImageBytesCache {
       bytes: bytes,
       writtenAt: now,
       accessedAt: now,
+      httpCacheMeta: httpCacheMeta,
     );
     _trimCapacity();
   }
@@ -965,11 +1191,13 @@ final class _MemoryEntry {
     required this.bytes,
     required this.writtenAt,
     required this.accessedAt,
+    this.httpCacheMeta,
   });
 
   final Uint8List bytes;
   final DateTime writtenAt;
   DateTime accessedAt;
+  final ImageHttpCacheMeta? httpCacheMeta;
 }
 
 /// Always misses. Used until bootstrap calls [ImageBytesCache.configure].
@@ -981,9 +1209,13 @@ final class NoOpImageBytesCache implements IImageBytesCache {
   @override
   Future<Uint8List?> read(ImageCacheKey key) async => null;
 
-  /// Discards [bytes]. Nothing is stored.
+  /// Discards [bytes] and [httpCacheMeta]. Nothing is stored.
   @override
-  Future<void> write(ImageCacheKey key, Uint8List bytes) async {}
+  Future<void> write(
+    ImageCacheKey key,
+    Uint8List bytes, {
+    ImageHttpCacheMeta? httpCacheMeta,
+  }) async {}
 
   /// Nothing to remove.
   @override

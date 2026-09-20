@@ -364,7 +364,7 @@ final class _ClosableProbeCache implements IImageBytesCache {
   Future<Uint8List?> read(ImageCacheKey key) async => null;
 
   @override
-  Future<void> write(ImageCacheKey key, Uint8List bytes) async {}
+  Future<void> write(ImageCacheKey key, Uint8List bytes, {ImageHttpCacheMeta? httpCacheMeta}) async {}
 
   @override
   Future<void> evict(ImageCacheKey key) async {}

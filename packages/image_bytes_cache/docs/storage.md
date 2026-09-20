@@ -18,9 +18,11 @@ refused.
 
 ### `IImageBytesIndex`
 
-Records only: `writtenAt`, `accessedAt`, `byteLength` per `ImageCacheKey`.
-`get` / `put` / `delete` / `values` mutate the RAM mirror. `commit` writes the
-durable document once. Memory fakes may no-op `commit`.
+Records per `ImageCacheKey`: `writtenAt`, `accessedAt`, `byteLength`, and
+optional HTTP cache meta (`etag`, `lastModified`, `date`, `expires`,
+`cacheControl`, `age`, `lastValidatedAt`). Those validators are not part of
+key identity. `get` / `put` / `delete` / `values` mutate the RAM mirror.
+`commit` writes the durable document once. Memory fakes may no-op `commit`.
 
 ### `IImageBytesBlobStore`
 
@@ -122,12 +124,17 @@ Remote bytes are disposable: corrupt recovery prefers wipe over crash loops.
 Cache:
 
 ```text
-{"v":1,"e":{"<key>":{"w":ms,"a":ms,"n":byteLength}}}
+{"v":1,"e":{"<key>":{"w":ms,"a":ms,"n":byteLength,"h"?:{"et","lm","d","x","cc","ag","lv"}}}}
 ```
+
+Optional `h` is HTTP validators and freshness. A missing `h`, or missing keys
+inside it, decodes as null meta. Existing caches that never wrote `h` keep
+working. Empty meta is omitted on encode. Version stays `1` while the schema
+stays backward-compatible.
 
 Unknown version or bad structure throws `FormatException`. Open paths delete
 the document, wipe blobs via `onWipe`, and report `index_wipe`. Adapters must
-encode/decode through the codec (fused UTF-8 JSON converters), not peel
+encode and decode through the codec (fused UTF-8 JSON converters), not peel
 `jsonEncode` / `utf8.encode` at call sites.
 
 ## VM durable path
@@ -183,8 +190,10 @@ is expected: web is not a second copy of the isolate worker model.
 ## Memory and NoOp
 
 `MemoryImageBytesCache` is an in-process map for tests and degraded open.
-Access times update on every read (cheap in memory). `close` is a no-op; the
-instance stays usable so tearDown can call `close` uniformly.
+Access times update on every read (cheap in memory). Optional
+`ImageHttpCacheMeta` sits on the same entry as the bytes, so `readRich` and
+middleware `execute` can return it. `close` is a no-op; the instance stays
+usable so tearDown can call `close` uniformly.
 
 `NoOpImageBytesCache` always misses and discards writes. It is the default
 `shared()` until bootstrap configures a real store. `close` is a no-op.

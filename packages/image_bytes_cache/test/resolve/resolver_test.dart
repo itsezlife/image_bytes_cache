@@ -447,7 +447,11 @@ final class _StickyEmptyImageBytesCache implements IImageBytesCache {
   Future<Uint8List?> read(ImageCacheKey key) async => Uint8List(0);
 
   @override
-  Future<void> write(ImageCacheKey key, Uint8List bytes) async {}
+  Future<void> write(
+    ImageCacheKey key,
+    Uint8List bytes, {
+    ImageHttpCacheMeta? httpCacheMeta,
+  }) async {}
 
   @override
   Future<void> evict(ImageCacheKey key) async {}
@@ -467,7 +471,11 @@ final class _ThrowingWriteImageBytesCache implements IImageBytesCache {
   Future<Uint8List?> read(ImageCacheKey key) async => null;
 
   @override
-  Future<void> write(ImageCacheKey key, Uint8List bytes) async {
+  Future<void> write(
+    ImageCacheKey key,
+    Uint8List bytes, {
+    ImageHttpCacheMeta? httpCacheMeta,
+  }) async {
     throw StateError('simulated durable write failure');
   }
 
@@ -499,7 +507,11 @@ final class _CloseRejectingImageBytesCache implements IImageBytesCache {
   }
 
   @override
-  Future<void> write(ImageCacheKey key, Uint8List bytes) async {
+  Future<void> write(
+    ImageCacheKey key,
+    Uint8List bytes, {
+    ImageHttpCacheMeta? httpCacheMeta,
+  }) async {
     _ensureOpen();
     _entries[key] = bytes;
   }
