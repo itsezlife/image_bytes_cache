@@ -76,24 +76,29 @@ unconditional GET, then soft write-through (bytes+meta on 200; meta refresh on
 revalidate on use; no validators retain until [ImageBytesRetention]; honor
 max-age / Expires / no-cache / must-revalidate / immutable. Retention is not
 HTTP freshness. Uses `HttpBytesClient.send` (`HttpBytesRequest`); typed HTTP
-errors propagate. Conditional GETs need [HttpBytesConditionalMiddleware] on the
-client. `cacheKey` sets durable and coalesce identity
-(`HttpBytesContext.identityOverride`). `cacheKey` plus request `Authorization`
-emits a debug diagnostic. `skipCache` sets `CacheContext.skipCache` when the
-store is a middleware wrapper with Skip-cache. Empty cached payloads count as a
-miss. Empty durable writes are not retained (evict). Write-through failures do
-not fail paint; throwing diagnostics `onEvent` is swallowed so it cannot become
-an unhandled async error. Resolve remains a single [Future] of the full body,
-not a public byte stream. Optional bytes-progress reporting (cumulative /
-optional total) may ride with the request so paint adapters can surface honest
-download progress; fresh cache hits do not invent mid-flight percents. 412 after
-conditional falls back to one unconditional GET. No public ETag flags on
-open/configure.
+errors propagate unless stale-on-network-error applies: non-empty cached bytes
+plus `$Network` / `$Timeout` / `$Server` return those bytes
+(`resolve_stale_used` when diagnostics are audible); cancel, auth failures,
+404-class `$Request`, and empty or missing cache still fail. Conditional GETs need
+[HttpBytesConditionalMiddleware] on the client. `cacheKey` sets durable and
+coalesce identity (`HttpBytesContext.identityOverride`). `cacheKey` plus request
+`Authorization` emits a debug diagnostic. `skipCache` sets
+`CacheContext.skipCache` when the store is a middleware wrapper with Skip-cache.
+Empty cached payloads count as a miss. Empty durable writes are not retained
+(evict). Write-through failures do not fail paint; throwing diagnostics
+`onEvent` is swallowed so it cannot become an unhandled async error. Resolve
+remains a single [Future] of the full body, not a public byte stream. Optional
+bytes-progress reporting (cumulative / optional total) may ride with the request
+so paint adapters can surface honest download progress; fresh cache hits do not
+invent mid-flight percents. 412 after conditional falls back to one
+unconditional GET. No public ETag flags on open/configure; no host `allowStale`
+either.
 _Avoid_: failing resolve when durable write fails; sticky empty capacity waste;
 replacing resolve with a streaming public API for progress alone; fake
 progress events that are not tied to real fetch bytes; assuming `skipCache`
 works without Skip-cache middleware; assuming conditional headers without
-Conditional middleware; conflating retention TTL with Cache-Control freshness
+Conditional middleware; conflating retention TTL with Cache-Control freshness;
+serving stale on cancel / auth / 404; host `allowStale` flags
 
 **HttpBytesClient**:
 HTTP GET with concurrency pool and in-flight coalesce by `ImageCacheKey`
@@ -115,10 +120,12 @@ synthetic chunk percents after the body is already fully buffered
 
 **ImageBytesDiagnostics**:
 Soft-failure policy (silent / developer log / onEvent). Process-wide `current`
-set by open/configure. Covers write-through, index wipe, degraded open, and
+set by open/configure. Covers write-through, index wipe, degraded open,
 `cache_key_authorization` (debug) when `cacheKey` is set with request
-`Authorization`. `onEvent` must not throw; throws are swallowed in `report`.
-Package does not depend on a product logger.
+`Authorization`, and `resolve_stale_used` (warning) when resolve completes with
+cached bytes after `$Network` / `$Timeout` / `$Server`. `onEvent` must not
+throw; throws are swallowed in `report`. Package does not depend on a product
+logger.
 _Avoid_: `package:l` inside the ladder; `enableLogging` bool soup; throwing
 host callbacks that escalate soft failures
 

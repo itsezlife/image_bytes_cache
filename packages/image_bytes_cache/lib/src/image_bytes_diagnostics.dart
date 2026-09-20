@@ -4,10 +4,6 @@ import 'package:meta/meta.dart';
 
 /// Soft-failure reporting for the image-bytes ladder.
 ///
-/// Does not change resolve or wipe behavior. It only controls whether anyone
-/// hears about write-through failures, index recovery, degraded open, and the
-/// cacheKey+Authorization notice. Default is [ImageBytesDiagnostics.silent].
-///
 /// Process-wide policy lives on [current], set by [ImageBytesCache.open] /
 /// [ImageBytesCache.configure].
 ///
@@ -92,7 +88,7 @@ enum ImageBytesLogLevel {
   /// Development notice (for example cacheKey set with Authorization headers).
   debug,
 
-  /// Recoverable / expected recovery.
+  /// Recoverable path that still completed (for example stale-on-network-error).
   warning,
 
   /// Unexpected durable failure after a successful network fetch.
@@ -114,6 +110,11 @@ extension type const ImageBytesLogOp(String value) implements String {
   /// `Authorization`. Override wins for durable and coalesce identity; mint
   /// distinct keys per tenant if you need both.
   static const cacheKeyAuthorization = ImageBytesLogOp('cache_key_authorization');
+
+  /// Cached bytes returned after `$Network`, `$Timeout`, or `$Server` failed
+  /// the GET. Resolve succeeds; the failure shows up here only when diagnostics
+  /// are audible.
+  static const resolveStaleUsed = ImageBytesLogOp('resolve_stale_used');
 }
 
 /// One soft-failure report from the image-bytes ladder.

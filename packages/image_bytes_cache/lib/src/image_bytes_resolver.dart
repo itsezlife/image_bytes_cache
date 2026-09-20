@@ -85,10 +85,23 @@ abstract interface class IImageBytesResolver {
   /// durable write failure is reported via [ImageBytesDiagnostics] and does
   /// not fail this future.
   ///
+  /// Flaky or offline GET: if this resolve already loaded non-empty cached
+  /// bytes for the key and the send fails with
+  /// [HttpBytesException$Network], [HttpBytesException$Timeout], or
+  /// [HttpBytesException$Server], the future completes with those bytes.
+  /// When Retry is on the client, it has already finished by the time
+  /// `$Server` reaches the ladder. Audible diagnostics get
+  /// [ImageBytesLogOp.resolveStaleUsed].
+  ///
+  /// Cancel, 401/403, and client errors such as 404 still fail the future.
+  /// Empty or missing cache entries do too. There is no host `allowStale`
+  /// switch; this is the engine default.
+  ///
   /// Uses [HttpBytesClient.send] with [HttpBytesRequest]. Typed
-  /// [HttpBytesException] failures propagate. When
-  /// [ImageBytesRequest.onBytesProgress] is set, the ladder forwards it on a
-  /// network fetch only. Fresh cache hits do not synthesize progress events.
+  /// [HttpBytesException] failures propagate when stale cannot be served.
+  /// When [ImageBytesRequest.onBytesProgress] is set, the ladder forwards it
+  /// on a network fetch only. Fresh cache hits do not synthesize progress
+  /// events.
   Future<Uint8List> resolve(ImageBytesRequest request);
 }
 
@@ -105,6 +118,10 @@ abstract interface class IImageBytesResolver {
 /// 5. 304: return cached bytes; soft meta refresh.
 /// 6. 200: return new bytes; soft write-through of bytes + response meta.
 /// 7. 412 after a conditional: one unconditional GET, then same as 200 / fail.
+/// 8. `$Network` / `$Timeout` / `$Server` after a non-empty cache hit: return
+///    those bytes and emit [ImageBytesLogOp.resolveStaleUsed] when diagnostics
+///    are audible. Cancel, auth failures, 404-class `$Request`, and empty or
+///    missing cache still throw.
 ///
 /// Freshness is [ImageHttpCacheFreshness], not [ImageBytesRetention].
 /// Conditional headers reach the wire only when the client includes
@@ -115,7 +132,8 @@ abstract interface class IImageBytesResolver {
 /// [ImageBytesRequest.cacheKey] sets durable identity and
 /// [HttpBytesContext.identityOverride] (coalesce). [ImageBytesRequest.skipCache]
 /// seeds [CacheContext.skipCache] on a middleware store. Network goes through
-/// [HttpBytesClient.send]; typed failures are [HttpBytesException].
+/// [HttpBytesClient.send]. Typed [HttpBytesException] failures propagate unless
+/// step 8 applies.
 ///
 /// [ImageBytesResolver.shared] does not snapshot the process-wide cache or
 /// client. Each [resolve] reads [ImageBytesCache.shared] and
@@ -247,6 +265,10 @@ final class ImageBytesResolver implements IImageBytesResolver {
       client: client,
       cacheContext: cacheContext,
       now: now,
+      staleBytes: switch (hit) {
+        final cached? when cached.bytes.isNotEmpty => cached.bytes,
+        _ => null,
+      },
     );
   }
 
@@ -255,7 +277,8 @@ final class ImageBytesResolver implements IImageBytesResolver {
   /// Seeds [HttpBytesContext.etag] / [HttpBytesContext.lastModified] for
   /// [HttpBytesConditionalMiddleware]. On 304, returns cached bytes and soft
   /// meta refresh. On 412, retries once without validators. On 200,
-  /// write-through new bytes and meta.
+  /// write-through new bytes and meta. Transient send failures fall through
+  /// to [_serveStaleOrRethrow] with [cached] bytes.
   Future<Uint8List> _revalidate({
     required ImageBytesRequest request,
     required ImageCacheKey key,
@@ -294,7 +317,7 @@ final class ImageBytesResolver implements IImageBytesResolver {
       unawaited(_softWrite(cache, key, bytes, cacheContext, nextMeta));
       return bytes;
     } on HttpBytesException$Request catch (error) {
-      // 412 Precondition Failed: one unconditional GET.
+      // 412 Precondition Failed: one unconditional GET (still may serve stale).
       if (error.statusCode != 412) rethrow;
       return _fetchAndStore(
         request: request,
@@ -303,11 +326,23 @@ final class ImageBytesResolver implements IImageBytesResolver {
         client: client,
         cacheContext: cacheContext,
         now: now,
+        staleBytes: cached.bytes,
+      );
+    } on HttpBytesException catch (error, stackTrace) {
+      return _serveStaleOrRethrow(
+        error: error,
+        stackTrace: stackTrace,
+        key: key,
+        staleBytes: cached.bytes,
       );
     }
   }
 
   /// Unconditional GET + soft write-through of bytes and response meta.
+  ///
+  /// Pass non-empty [staleBytes] when the ladder already held a body for this
+  /// key so [_serveStaleOrRethrow] can return it on transient failure. Null or
+  /// empty means the failure still throws.
   Future<Uint8List> _fetchAndStore({
     required ImageBytesRequest request,
     required ImageCacheKey key,
@@ -315,16 +350,65 @@ final class ImageBytesResolver implements IImageBytesResolver {
     required HttpBytesClient client,
     required CacheContext? cacheContext,
     required DateTime now,
+    Uint8List? staleBytes,
   }) async {
-    final httpContext = _seedHttpContext(request);
-    final response = await _send(client, request, httpContext);
-    final bytes = await response.toBytes();
-    final meta = ImageHttpCacheFreshness.fromResponseHeaders(
-      response.headers,
-      validatedAt: now,
-    );
-    unawaited(_softWrite(cache, key, bytes, cacheContext, meta));
-    return bytes;
+    try {
+      final httpContext = _seedHttpContext(request);
+      final response = await _send(client, request, httpContext);
+      final bytes = await response.toBytes();
+      final meta = ImageHttpCacheFreshness.fromResponseHeaders(
+        response.headers,
+        validatedAt: now,
+      );
+      unawaited(_softWrite(cache, key, bytes, cacheContext, meta));
+      return bytes;
+    } on HttpBytesException catch (error, stackTrace) {
+      return _serveStaleOrRethrow(
+        error: error,
+        stackTrace: stackTrace,
+        key: key,
+        staleBytes: staleBytes,
+      );
+    }
+  }
+
+  /// Returns non-empty [staleBytes] for `$Network` / `$Timeout` / `$Server`.
+  ///
+  /// If Retry is in the stack, it has already finished before `$Server` lands
+  /// here. Cancel, auth, `$Request`, `$Internal`, and empty or missing cache
+  /// always rethrow. Audible diagnostics get [ImageBytesLogOp.resolveStaleUsed].
+  Uint8List _serveStaleOrRethrow({
+    required HttpBytesException error,
+    required StackTrace stackTrace,
+    required ImageCacheKey key,
+    required Uint8List? staleBytes,
+  }) {
+    // Only the three transient classes qualify. Exhaustiveness keeps
+    // Cancelled / Authentication / Request / Internal on the failure path.
+    final allowStale = switch (error) {
+      HttpBytesException$Network() || HttpBytesException$Timeout() || HttpBytesException$Server() => true,
+      HttpBytesException$Cancelled() ||
+      HttpBytesException$Authentication() ||
+      HttpBytesException$Request() ||
+      HttpBytesException$Internal() => false,
+    };
+
+    if (allowStale) {
+      if (staleBytes case final bytes? when bytes.isNotEmpty) {
+        _effectiveDiagnostics.report(
+          ImageBytesLogEvent(
+            level: ImageBytesLogLevel.warning,
+            message:
+                'ImageBytesResolver serving stale cached bytes for ${key.value} '
+                'after ${error.runtimeType}: ${error.message}',
+            op: ImageBytesLogOp.resolveStaleUsed,
+            stackTrace: stackTrace,
+          ),
+        );
+        return bytes;
+      }
+    }
+    Error.throwWithStackTrace(error, stackTrace);
   }
 
   HttpBytesContext _seedHttpContext(ImageBytesRequest request) {

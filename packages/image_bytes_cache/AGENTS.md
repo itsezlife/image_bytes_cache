@@ -93,7 +93,10 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
 - **Empty cached payload = miss** in the resolver; empty durable writes are
   not retained (evict); sticky empty rows scrub on read; write-through failure
   never fails a successful network resolve (diagnostics only; throwing
-  `onEvent` is swallowed).
+  `onEvent` is swallowed). Stale-on-network-error returns non-empty cached
+  bytes on `$Network` / `$Timeout` / exhausted `$Server` only — never on
+  `$Cancelled` / `$Authentication` / definitive `$Request` or empty/missing
+  cache.
 - **Open:** hard storage failure degrades to `MemoryImageBytesCache` unless
   `throwOnOpenFailure`; partial VM worker / web handles are closed before
   degrade or rethrow. Missing VM `directory` still throws. `configure`

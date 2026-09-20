@@ -86,16 +86,20 @@ resolve API. The sink does not participate in identity or coalesce.
 6. 200 returns new bytes and soft write-through of bytes plus response-derived
    HTTP meta.
 7. 412 after a conditional GET: one unconditional GET, then same as 200 or fail.
-8. Typed `HttpBytesException` failures propagate. Write-through failures report
-   through `ImageBytesDiagnostics` and do not fail `resolve`. A throwing host
-   `onEvent` is swallowed inside `report`.
+8. `$Network` / `$Timeout` / `$Server` after a non-empty cache hit: return those
+   bytes and emit `resolve_stale_used` when diagnostics are audible. Cancel,
+   auth failures, 404-class `$Request`, and empty or missing cache still throw.
+9. Other typed `HttpBytesException` failures propagate. Write-through failures
+   report through `ImageBytesDiagnostics` and do not fail `resolve`. A throwing
+   host `onEvent` is swallowed inside `report`.
 
 Default freshness when `Cache-Control` / `Expires` are absent: validators
 revalidate on every use; no validators retain until retention would drop the
 row. When those headers are present, honor `max-age` / `Expires` (with `Age` /
 `Date` when known); `no-cache` / `must-revalidate` always revalidate;
 `immutable` stays fresh until retention. No public ETag flags on `open` /
-`configure`.
+`configure`. There is no host `allowStale` switch either; stale-on-network-error
+is the engine default.
 
 Inject cache and client in tests. Production paint usually uses
 `ImageBytesResolver.shared()`, which re-reads `ImageBytesCache.shared()` and
@@ -227,6 +231,7 @@ Ops on `ImageBytesLogEvent`:
 | `index_wipe` | Corrupt / unrecognized index recovered by wipe |
 | `open_degraded` | Hard open failed; host received Memory store instead of throw |
 | `cache_key_authorization` | `cacheKey` set with an `Authorization` request header (debug) |
+| `resolve_stale_used` | Resolve completed with cached bytes after `$Network` / `$Timeout` / `$Server` (warning) |
 
 The package does not depend on a product logger. Hosts bridge
 `onEvent` at bootstrap if they want ambient logging.

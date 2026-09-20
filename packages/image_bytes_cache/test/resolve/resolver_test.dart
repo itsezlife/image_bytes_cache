@@ -769,6 +769,232 @@ void main() {
     });
   });
 
+  group('ImageBytesResolver stale-on-network-error', () {
+    const url = 'https://cdn.example.com/stale-fallback.svg';
+    final body = Uint8List.fromList([4, 4, 4]);
+    final now = DateTime.utc(2024, 6, 1, 12);
+
+    Future<MemoryImageBytesCache> seededCache({ImageHttpCacheMeta? meta}) async {
+      final cache = MemoryImageBytesCache(clock: () => now);
+      await cache.write(
+        ImageCacheKey.fromUrl(url),
+        body,
+        httpCacheMeta:
+            meta ??
+            ImageHttpCacheMeta(
+              etag: '"v1"',
+              lastValidatedAt: now.subtract(const Duration(days: 1)),
+            ),
+      );
+      return cache;
+    }
+
+    HttpBytesClient clientThrowing(HttpBytesException error) {
+      final client = HttpBytesClient(
+        client: MockClient((_) async => http.Response.bytes(Uint8List.fromList([9]), 200)),
+        middlewares: <HttpBytesMiddleware>[
+          (_) =>
+              (request, context) async => throw error,
+        ],
+      );
+      addTearDown(client.close);
+      return client;
+    }
+
+    HttpBytesClient clientWithHandler(MockClientHandler handler) {
+      final client = HttpBytesClient(
+        client: MockClient(handler),
+        middlewares: <HttpBytesMiddleware>[
+          const HttpBytesTimeoutMiddleware(),
+          const HttpBytesConditionalMiddleware(),
+        ],
+      );
+      addTearDown(client.close);
+      return client;
+    }
+
+    test(r'non-empty cache + $Network returns cached bytes and reports stale_used', () async {
+      final events = <ImageBytesLogEvent>[];
+      final cache = await seededCache();
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: clientThrowing(
+          const HttpBytesException$Network(
+            code: 'network_error',
+            message: 'down',
+            statusCode: 0,
+          ),
+        ),
+        diagnostics: ImageBytesDiagnostics.onEvent(events.add),
+        clock: () => now,
+      );
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
+      expect(events, hasLength(1));
+      expect(events.single.op, ImageBytesLogOp.resolveStaleUsed);
+      expect(events.single.level, ImageBytesLogLevel.warning);
+      expect(events.single.message, contains('stale'));
+    });
+
+    test(r'non-empty cache + $Timeout returns cached bytes', () async {
+      final cache = await seededCache();
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: clientThrowing(
+          const HttpBytesException$Timeout(
+            code: 'timeout',
+            message: 'connect timed out',
+            statusCode: 0,
+            duration: Duration(milliseconds: 20),
+          ),
+        ),
+        clock: () => now,
+      );
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
+    });
+
+    test(r'exhausted $Server with cached bytes returns cached bytes', () async {
+      final cache = await seededCache();
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: clientWithHandler((_) async => http.Response('boom', 503)),
+        clock: () => now,
+      );
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
+    });
+
+    test(r'$Cancelled with cached bytes propagates failure', () async {
+      final cache = await seededCache();
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: clientThrowing(const HttpBytesException$Cancelled()),
+        clock: () => now,
+      );
+
+      await expectLater(
+        resolver.resolve(const ImageBytesRequest(url: url)),
+        throwsA(isA<HttpBytesException$Cancelled>()),
+      );
+    });
+
+    test(r'$Authentication with cached bytes propagates failure', () async {
+      final cache = await seededCache();
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: clientWithHandler((_) async => http.Response('nope', 401)),
+        clock: () => now,
+      );
+
+      await expectLater(
+        resolver.resolve(const ImageBytesRequest(url: url)),
+        throwsA(isA<HttpBytesException$Authentication>()),
+      );
+    });
+
+    test('definitive 404 with cached bytes propagates failure', () async {
+      final cache = await seededCache();
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: clientWithHandler((_) async => http.Response('gone', 404)),
+        clock: () => now,
+      );
+
+      await expectLater(
+        resolver.resolve(const ImageBytesRequest(url: url)),
+        throwsA(
+          isA<HttpBytesException$Request>().having((e) => e.statusCode, 'statusCode', 404),
+        ),
+      );
+    });
+
+    test(r'missing cache + $Network propagates failure', () async {
+      final resolver = ImageBytesResolver(
+        cache: MemoryImageBytesCache(clock: () => now),
+        client: clientThrowing(
+          const HttpBytesException$Network(
+            code: 'network_error',
+            message: 'down',
+            statusCode: 0,
+          ),
+        ),
+        clock: () => now,
+      );
+
+      await expectLater(
+        resolver.resolve(const ImageBytesRequest(url: url)),
+        throwsA(isA<HttpBytesException$Network>()),
+      );
+    });
+
+    test(r'empty cached payload + $Network propagates failure', () async {
+      final resolver = ImageBytesResolver(
+        cache: _StickyEmptyImageBytesCache(),
+        client: clientThrowing(
+          const HttpBytesException$Network(
+            code: 'network_error',
+            message: 'down',
+            statusCode: 0,
+          ),
+        ),
+        clock: () => now,
+      );
+
+      await expectLater(
+        resolver.resolve(const ImageBytesRequest(url: url)),
+        throwsA(isA<HttpBytesException$Network>()),
+      );
+    });
+
+    test('silent diagnostics emits nothing when stale is used', () async {
+      final events = <ImageBytesLogEvent>[];
+      ImageBytesDiagnostics.current = ImageBytesDiagnostics.onEvent(events.add);
+      addTearDown(() {
+        ImageBytesDiagnostics.current = const ImageBytesDiagnostics.silent();
+      });
+
+      final cache = await seededCache();
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: clientThrowing(
+          const HttpBytesException$Network(
+            code: 'network_error',
+            message: 'down',
+            statusCode: 0,
+          ),
+        ),
+        diagnostics: const ImageBytesDiagnostics.silent(),
+        clock: () => now,
+      );
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
+      expect(events, isEmpty);
+    });
+
+    test(r'stale without validators + $Network still returns cached bytes', () async {
+      final cache = await seededCache(
+        meta: ImageHttpCacheMeta(
+          cacheControl: 'max-age=1',
+          lastValidatedAt: now.subtract(const Duration(hours: 1)),
+        ),
+      );
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: clientThrowing(
+          const HttpBytesException$Network(
+            code: 'network_error',
+            message: 'down',
+            statusCode: 0,
+          ),
+        ),
+        clock: () => now,
+      );
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
+    });
+  });
+
   group('ImageBytesResolver.shared live wiring', () {
     tearDown(() async {
       await ImageBytesCache.resetShared();

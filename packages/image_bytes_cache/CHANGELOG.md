@@ -1,5 +1,12 @@
 ## Unreleased
 
+- **CHANGED**: `ImageBytesResolver` returns non-empty cached bytes when the
+  HTTP attempt fails with `$Network`, `$Timeout`, or `$Server`. If Retry is on
+  the client, it has already finished before `$Server` reaches the ladder.
+  Cancel, 401/403, and client errors such as 404 still fail resolve. Empty or
+  missing cache still fails. Audible diagnostics emit `resolve_stale_used` at
+  warning.
+- **ADDED**: `ImageBytesLogOp.resolveStaleUsed`.
 - **CHANGED**: `ImageBytesResolver` implements HTTP freshness revalidation.
   Fresh hits skip the network. Stale hits with ETag / Last-Modified issue a
   conditional GET when `HttpBytesConditionalMiddleware` is on the client; 304
