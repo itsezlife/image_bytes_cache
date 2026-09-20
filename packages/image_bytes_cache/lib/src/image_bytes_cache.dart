@@ -29,8 +29,12 @@ final class ImageCacheKey {
   ///
   /// Header keys are lowercased and sorted before hashing so casing and map
   /// iteration order do not change identity (parity with
-  /// [HttpBytesClient] coalesce). Values stay as given. Fingerprint material
-  /// is a length-prefixed encoding of URL + canonical headers so a `|` (or any
+  /// [HttpBytesClient] coalesce). Conditional request headers
+  /// (`If-None-Match`, `If-Modified-Since`, and RFC equivalents) are
+  /// **excluded** from identity so local validators stay wire-only and do not
+  /// fragment coalesce or durable keys. Other headers (e.g. `Authorization`)
+  /// still participate. Values stay as given. Fingerprint material is a
+  /// length-prefixed encoding of URL + canonical headers so a `|` (or any
   /// other character) inside the URL or a header value cannot forge another
   /// (url, headers) pair.
   ///
@@ -76,15 +80,31 @@ final class ImageCacheKey {
   /// Cap on the basename segment before host/fingerprint are applied.
   static const int _maxBasenameLength = 64;
 
+  /// HTTP conditional request headers that never participate in identity.
+  ///
+  /// They are set for revalidation on the wire only. Folding them into
+  /// [fromUrl] / coalesce would split flights that share the same representation
+  /// (Authorization and friends still participate).
+  static const Set<String> _conditionalRequestHeaders = {
+    'if-match',
+    'if-none-match',
+    'if-modified-since',
+    'if-unmodified-since',
+    'if-range',
+  };
+
   /// Lowercase keys, last-wins on case duplicates, then sorted `k=v` join.
   ///
-  /// Shared with [HttpBytesClient] coalesce so header casing and map order
-  /// cannot split cache identity from in-flight GET dedupe.
+  /// Skips [_conditionalRequestHeaders]. Shared with [HttpBytesClient] coalesce
+  /// so header casing and map order cannot split cache identity from in-flight
+  /// GET dedupe, while validators stay wire-only.
   static String canonicalHeaders(Map<String, String>? headers) {
     if (headers == null || headers.isEmpty) return '';
     final normalized = <String, String>{
-      for (final MapEntry(:key, :value) in headers.entries) key.toLowerCase(): value,
+      for (final MapEntry(:key, :value) in headers.entries)
+        if (!_conditionalRequestHeaders.contains(key.toLowerCase())) key.toLowerCase(): value,
     };
+    if (normalized.isEmpty) return '';
     final keys = normalized.keys.toList()..sort();
     return keys.map((k) => '$k=${normalized[k]}').join('&');
   }

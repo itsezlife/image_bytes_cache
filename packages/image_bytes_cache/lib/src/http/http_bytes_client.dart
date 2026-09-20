@@ -88,7 +88,7 @@ extension type HttpBytesContext(Map<String, Object?> _map) implements Map<String
   /// Progress callback while the response body is read.
   static const onBytesProgressKey = 'on-bytes-progress';
 
-  /// Success predicate; default is 2xx.
+  /// Success predicate; default is 2xx or 304 Not Modified.
   static const validateStatusKey = 'validate-status';
 
   /// When `true`, [HttpBytesRetryMiddleware] skips retry for this send.
@@ -133,7 +133,7 @@ extension type HttpBytesContext(Map<String, Object?> _map) implements Map<String
   };
   set onBytesProgress(ImageBytesProgressCallback? value) => _set(onBytesProgressKey, value);
 
-  /// Success predicate; default is 2xx.
+  /// Success predicate; default is 2xx or 304 Not Modified.
   bool Function(int statusCode)? get validateStatus => switch (_map[validateStatusKey]) {
     final bool Function(int statusCode) predicate => predicate,
     _ => null,
@@ -291,13 +291,20 @@ final class HttpBytesResponse {
 ///
 /// Concurrent callers that share the same **post-middleware** coalesce identity
 /// join one in-flight GET. Identity is `ImageCacheKey` from the request URL +
-/// headers after request-mutating middleware (e.g. Bearer) runs. Each caller may
-/// pass its own [CancelToken]:
+/// headers after request-mutating middleware (e.g. Bearer) runs. Conditional
+/// request headers (`If-None-Match` / `If-Modified-Since` / equivalents) are
+/// excluded from that fingerprint so local validators do not fragment flights.
+/// Each caller may pass its own [CancelToken]:
 /// - canceling one subscriber completes only that caller with
 ///   [HttpBytesException$Cancelled] and leaves the flight running;
 /// - canceling the last subscriber cancels the shared flight token (socket
 ///   abort). Timeout middleware cancels that same flight token and still
 ///   surfaces [HttpBytesException$Timeout], not Cancelled.
+///
+/// Status handling: default success is 2xx **or** 304 Not Modified. A 304
+/// completes with headers and an empty body (illegal non-empty 304 bodies are
+/// ignored). Empty-body-as-[HttpBytesException$Internal] still applies when a
+/// successful body was expected (non-304).
 /// {@endtemplate}
 final class HttpBytesClient {
   /// {@macro http_bytes_client}
@@ -373,8 +380,10 @@ final class HttpBytesClient {
   /// Immutable list of middlewares to apply for each send.
   final List<HttpBytesMiddleware> middlewares;
 
-  /// Decides whether a response [statusCode] is a success. Defaults to 2xx.
-  /// Overridable per request via [HttpBytesContext.validateStatus].
+  /// Decides whether a response [statusCode] is a success.
+  ///
+  /// Defaults to 2xx **or** 304 Not Modified (revalidation success with no
+  /// body). Overridable per request via [HttpBytesContext.validateStatus].
   final bool Function(int statusCode)? validateStatus;
 
   /// Runs [request] through middlewares (delegates to [_sendUnstreamed]).
@@ -462,12 +471,21 @@ final class HttpBytesClient {
         // Joiner: flight already completed with a buffered body.
         if (response.body != null) return response;
 
-        final bytes = await response.toBytes();
+        final rawBytes = await response.toBytes();
         final flight = switch (ctx[_kInFlight]) {
           final _HttpBytesInFlight f => f,
           _ => null,
         };
-        if (bytes.isEmpty) {
+        // 304 Not Modified: success with no body. RFC forbids a message body;
+        // illegal non-empty payloads from misbehaving CDNs are ignored so they
+        // cannot replace caller expectations (ladder reuses cached bytes).
+        // Empty-body-as-Internal still applies when a successful body was
+        // expected (non-304).
+        final bytes = switch (response.statusCode) {
+          304 => Uint8List(0),
+          _ => rawBytes,
+        };
+        if (bytes.isEmpty && response.statusCode != 304) {
           final error = HttpBytesException$Internal(
             code: 'empty_body',
             message: 'Downloaded body is empty: $url',
@@ -480,6 +498,7 @@ final class HttpBytesClient {
         final buffered = response.clone(
           stream: http.ByteStream.fromBytes(bytes),
           body: bytes,
+          contentLength: response.statusCode == 304 ? 0 : null,
         );
         flight?.completeSuccess(buffered);
         return buffered;
@@ -816,9 +835,13 @@ HttpBytesHandler _createClientSend(
         final contentLength = streamedResponse.contentLength ?? 0;
         var byteStream = streamedResponse.stream;
 
+        // 304: RFC forbids a body. Skip progress on any illegal payload; the
+        // buffer path will force an empty body before fan-out.
+        final isNotModified = statusCode == 304;
+
         // Report download progress as the body is consumed, if a callback was provided.
         // `total` is the Content-Length, or `null` when the server did not declare one.
-        if (context.onBytesProgress case final onBytesProgress?) {
+        if (context.onBytesProgress case final onBytesProgress? when !isNotModified) {
           final total = contentLength > 0 ? contentLength : null;
           var received = 0;
           byteStream = http.ByteStream(
@@ -835,7 +858,7 @@ HttpBytesHandler _createClientSend(
             HttpBytesResponse(
               statusCode: statusCode,
               headers: Map<String, String>.from(streamedResponse.headers),
-              contentLength: contentLength,
+              contentLength: isNotModified ? 0 : contentLength,
               request: request,
               stream: byteStream,
             ),
@@ -853,8 +876,12 @@ HttpBytesHandler _createClientSend(
   return httpHandler;
 }
 
-/// Default success predicate for image GETs: 2xx only.
-bool _defaultValidateStatus(int statusCode) => statusCode >= 200 && statusCode < 300;
+/// Default success predicate for image GETs: 2xx, or 304 Not Modified.
+///
+/// 304 is a first-class revalidation success (headers present; body optional
+/// and ignored). Without it, conditional GETs would surface as `$Request` and
+/// Retry would never see a clean success.
+bool _defaultValidateStatus(int statusCode) => (statusCode >= 200 && statusCode < 300) || statusCode == 304;
 
 /// Maps a non-success [statusCode] to a typed [HttpBytesException].
 ///

@@ -12,7 +12,11 @@ Filename-safe string: host + safe basename + short fingerprint of the
 host/basename extraction and hashing, so a relative path and its absolute form
 against the same base share one key — the same URI form
 `ImageBytesResolver` uses for GET. Header keys are lowercased, last-wins on
-case duplicates, then sorted before hashing (`canonicalHeaders`). Fingerprint
+case duplicates, then sorted before hashing (`canonicalHeaders`). Conditional
+request headers (`If-None-Match`, `If-Modified-Since`, `If-Match`,
+`If-Unmodified-Since`, `If-Range`) are **excluded** from that material so local
+validators stay wire-only and do not fragment coalesce or durable keys;
+`Authorization` and other representation headers still participate. Fingerprint
 bytes are length-prefixed URL + canonical headers (not a `url|headers` string
 join), so a `|` inside the URL or a header value cannot forge another
 `(url, headers)` pair.
@@ -32,7 +36,7 @@ names and web store keys.
 
 Do not use basename-only disk keys. Do not treat header key casing as identity.
 Do not join URL and headers with an ambiguous delimiter for coalesce or
-fingerprinting.
+fingerprinting. Do not fold conditional request headers into identity.
 
 ## Request and resolve
 
@@ -112,7 +116,8 @@ GET bodies only. Callers own disk cache and decode.
 Middleware list order is outermost first (first entry wraps the rest). Coalesce
 runs **inside** the middleware chain (after request-mutating middleware, before
 `Client.send`), so identity is `ImageCacheKey` from the **post-middleware** URL +
-headers (Bearer-injected `Authorization` participates). Concurrent calls that
+headers (Bearer-injected `Authorization` participates; conditional request
+headers do not). Concurrent calls that
 share that identity share one in-flight GET; each caller still gets its own
 `Future` (so per-caller cancel can fail one joiner without aborting the flight).
 Joiners do not hold a pool slot. The starter returns a streaming response so
@@ -124,10 +129,13 @@ wrap coalesce + `Client.send`). `_createClientSend` is Client.send-only: status,
 progress `ByteStream.map`. Failures surface only as the sealed
 `HttpBytesException` variants (`$Network`, `$Request`, `$Server`,
 `$Authentication`, `$Timeout`, `$Cancelled`, `$Internal`), each with `code` /
-`statusCode` / `message` / optional `error` / `data`. Non-2xx maps by status:
-401/403 → `$Authentication`, 5xx → `$Server`, else `$Request`. `getBytes`
-remains a convenience over `send(HttpBytesRequest)` (body via `toBytes` /
-cached `body`).
+`statusCode` / `message` / optional `error` / `data`. Default success is 2xx
+**or** 304 Not Modified (headers present; body optional and ignored — illegal
+non-empty 304 bodies are discarded). Empty-body-as-`$Internal` still applies
+when a successful body was expected (non-304). Other non-success statuses map
+by code: 401/403 → `$Authentication`, 5xx → `$Server`, else `$Request`.
+`getBytes` remains a convenience over `send(HttpBytesRequest)` (body via
+`toBytes` / cached `body`).
 
 Each `send` creates a **flight** [CancelToken] on `HttpBytesContext.cancelToken`
 and uses it as the Abortable GET `abortTrigger`. Callers may pass their own
@@ -143,7 +151,8 @@ first). Ad-hoc hooks use `HttpBytesMiddlewareWrapper(onRequest: …)`.
 
 `HttpBytesRetryMiddleware` (opt-in) retries idempotent GETs on transient failures
 (`$Network` / 408 / 425 / 429 / selected 5xx), honors delta-seconds `Retry-After`,
-and never retries `$Timeout` / `$Cancelled` / `$Authentication`. Place it
+and never retries `$Timeout` / `$Cancelled` / `$Authentication`. 304 Not Modified
+is a client success (no exception), so Retry does not retry it. Place it
 **outside** Timeout. `HttpBytesBearerMiddleware` only sets
 `Authorization: Bearer …` from `getToken` — no logout / refresh.
 `HttpBytesLoggerMiddleware$Developer` (opt-in) logs method/URL/outcome/latency

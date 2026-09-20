@@ -53,8 +53,9 @@ Duration? _retryAfter(Object error) {
 /// );
 /// ```
 ///
-/// Classification: [retryEvaluator] or [defaultRetryEvaluator]. Do not nest
-/// another retry layer above the ladder.
+/// Classification: [retryEvaluator] or [defaultRetryEvaluator]. 304 Not
+/// Modified is a success from the client (no exception), so this layer never
+/// retries it. Do not nest another retry layer above the ladder.
 /// {@endtemplate}
 @immutable
 class HttpBytesRetryMiddleware {

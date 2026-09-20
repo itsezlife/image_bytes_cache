@@ -176,6 +176,45 @@ void main() {
       expect(a, isNot(equals(b)));
     });
 
+    test('conditional request headers do not change identity', () {
+      final plain = ImageCacheKey.fromUrl('https://x.test/a.svg');
+      final withValidators = ImageCacheKey.fromUrl(
+        'https://x.test/a.svg',
+        headers: const {
+          'If-None-Match': '"v1"',
+          'If-Modified-Since': 'Wed, 21 Oct 2015 07:28:00 GMT',
+          'If-Match': '"v0"',
+          'If-Unmodified-Since': 'Wed, 21 Oct 2015 07:28:00 GMT',
+          'If-Range': '"v1"',
+        },
+      );
+      final mixedCase = ImageCacheKey.fromUrl(
+        'https://x.test/a.svg',
+        headers: const {'if-none-match': '"other"'},
+      );
+      expect(withValidators, equals(plain));
+      expect(mixedCase, equals(plain));
+      expect(
+        ImageCacheKey.canonicalHeaders(const {'If-None-Match': '"v1"', 'Authorization': 't'}),
+        equals(ImageCacheKey.canonicalHeaders(const {'Authorization': 't'})),
+      );
+      // Authorization still participates; only conditionals are stripped.
+      expect(
+        ImageCacheKey.fromUrl(
+          'https://x.test/a.svg',
+          headers: const {'Authorization': 'a', 'If-None-Match': '"v1"'},
+        ),
+        isNot(
+          equals(
+            ImageCacheKey.fromUrl(
+              'https://x.test/a.svg',
+              headers: const {'Authorization': 'b', 'If-None-Match': '"v1"'},
+            ),
+          ),
+        ),
+      );
+    });
+
     test('header key casing does not change identity', () {
       final a = ImageCacheKey.fromUrl(
         'https://x.test/a.svg',

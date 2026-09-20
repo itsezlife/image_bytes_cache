@@ -106,12 +106,15 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
 ## Gotchas quick-reference
 
 - Header key casing and map order must not change identity or coalesce keys
-  (`ImageCacheKey.canonicalHeaders`).
+  (`ImageCacheKey.canonicalHeaders`). Conditional request headers
+  (`If-None-Match` / `If-Modified-Since` / equivalents) are excluded from
+  identity; `Authorization` and other representation headers still participate.
 - Coalesce and durable identity use `ImageCacheKey` (length-prefixed fingerprint
   material; no `url|headers` join). Relative vs absolute `Uri.base` equivalents
   share one key; explicit `cacheKey` is full identity (headers on wire only).
   In-flight coalesce keys are **post-middleware** (Bearer `Authorization`
-  participates); durable resolve keys still use request headers / `cacheKey`.
+  participates; conditionals do not); durable resolve keys still use request
+  headers / `cacheKey`.
 - Distinct URLs that share a basename must not collide on disk (fingerprint).
 - VM store under app **cache** root, not documents. Web ignores `directory`.
 - `MemoryImageBytesCache` / `NoOpImageBytesCache` stay usable after `close`;
@@ -123,6 +126,8 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
   **flight** `CancelToken.whenCancel` after a slot is acquired; per-caller tokens
   cancel only that subscriber until the last one aborts the flight. Per-send
   overrides live on typed `HttpBytesContext` (sealed `$` exceptions for hosts).
+  Default success is 2xx or 304; empty-body-as-`$Internal` does not apply to 304
+  (illegal 304 bodies are ignored).
 - Chrome open test is the honesty check for Cache/OPFS and a CI merge gate; do
   not merge web blob changes on green VM tests alone.
 

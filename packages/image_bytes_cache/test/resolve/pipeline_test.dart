@@ -181,6 +181,26 @@ void main() {
       );
       expect(attempts, 1, reason: 'budget exhausted after the first attempt — no retry');
     });
+
+    test('does not retry a 304 Not Modified success', () async {
+      var attempts = 0;
+      final client = buildClient(
+        httpClient: MockClient((_) async {
+          attempts++;
+          return http.Response.bytes(Uint8List(0), 304);
+        }),
+      );
+
+      final response = await client.send(
+        HttpBytesRequest(
+          http.Request('GET', Uri.parse('https://cdn.test/data')),
+        ),
+      );
+
+      expect(response.statusCode, 304);
+      expect(await response.toBytes(), isEmpty);
+      expect(attempts, 1);
+    });
   });
 
   group('HttpBytesRetryMiddleware.defaultRetryEvaluator', () {

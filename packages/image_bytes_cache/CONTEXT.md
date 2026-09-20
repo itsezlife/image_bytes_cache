@@ -19,12 +19,15 @@ Deep docs: [AGENTS.md](AGENTS.md) (agent orientation),
 **ImageCacheKey**:
 Filename-safe identity for a remote image body. Derived from the
 `Uri.base.resolve` canonical URL + canonical headers (lowercase keys, sorted).
-Fingerprint material is length-prefixed (not a `url|headers` join). Distinct
-URLs that share a basename do not collide. Relative and absolute forms of the
-same resource share one key. Explicit `ImageBytesRequest.cacheKey` is a full
-identity escape hatch: headers still go on the wire but are not folded in.
+Conditional request headers (`If-None-Match`, `If-Modified-Since`, and RFC
+equivalents) are excluded from the fingerprint so local validators stay
+wire-only. Fingerprint material is length-prefixed (not a `url|headers` join).
+Distinct URLs that share a basename do not collide. Relative and absolute forms
+of the same resource share one key. Explicit `ImageBytesRequest.cacheKey` is a
+full identity escape hatch: headers still go on the wire but are not folded in.
 _Avoid_: basename-only disk keys, header casing as identity, delimiter joins
-for coalesce/fingerprint, assuming override keys fold Authorization
+for coalesce/fingerprint, folding conditionals into identity, assuming override
+keys fold Authorization
 
 **IImageBytesCache** / **IndexedImageBytesCache**:
 Bytes store contract and the indexed composition over meta + blob halves.
@@ -80,15 +83,18 @@ progress events that are not tied to real fetch bytes
 
 **HttpBytesClient**:
 HTTP GET with concurrency pool and in-flight coalesce by `ImageCacheKey` identity
-(canonical URL + canonical headers). Timeout after pool slot via
-`AbortableRequest` (aborts when the client honors it). Pool wait for a slot is
-intentionally unbounded. When a progress sink is supplied, reports cumulative
-bytes as the response body is read (total when the response provides it).
-Process-wide `configure` / `shared` / `resetShared` mirror the cache facade so
-hosts can inject a custom `http.Client` once at bootstrap.
+(canonical URL + canonical headers; conditionals excluded). Default success is
+2xx or 304 Not Modified (empty/ignored body; empty-body-as-`$Internal` only for
+non-304). Timeout after pool slot via `AbortableRequest` (aborts when the client
+honors it). Pool wait for a slot is intentionally unbounded. When a progress
+sink is supplied, reports cumulative bytes as the response body is read (total
+when the response provides it). Process-wide `configure` / `shared` /
+`resetShared` mirror the cache facade so hosts can inject a custom `http.Client`
+once at bootstrap.
 _Avoid_: homemade download queues; Mutex for N-way downloads; `url|headers`
-string joins for coalesce; assuming timeout covers pool queue time; synthetic
-chunk percents after the body is already fully buffered
+string joins for coalesce; assuming timeout covers pool queue time; treating 304
+as `$Request` or empty-body `$Internal`; synthetic chunk percents after the body
+is already fully buffered
 
 **ImageBytesDiagnostics**:
 Soft-failure policy (silent / developer log / onEvent). Process-wide `current`
