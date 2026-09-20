@@ -1,5 +1,12 @@
 ## Unreleased
 
+- **ADDED**: Opt-in `HttpBytesConditionalMiddleware`. Seed
+  `HttpBytesContext.etag` and/or `lastModified`; non-empty values become
+  `If-None-Match` / `If-Modified-Since` on the wire. Empty context leaves the
+  GET unconditional. Place after Bearer and before coalesce. Recommended stack
+  (outermost first): Logger → Retry → Timeout → Bearer → Conditional. Default
+  client middleware list stays Timeout-only.
+
 ## 0.2.0
 
 - **BREAKING**: Renamed `HttpBytesFetcher` to `HttpBytesClient` (file

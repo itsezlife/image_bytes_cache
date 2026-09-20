@@ -85,7 +85,10 @@ progress events that are not tied to real fetch bytes
 HTTP GET with concurrency pool and in-flight coalesce by `ImageCacheKey` identity
 (canonical URL + canonical headers; conditionals excluded). Default success is
 2xx or 304 Not Modified (empty/ignored body; empty-body-as-`$Internal` only for
-non-304). Timeout after pool slot via `AbortableRequest` (aborts when the client
+non-304). Opt-in [HttpBytesConditionalMiddleware] maps context `etag` /
+`lastModified` to `If-None-Match` / `If-Modified-Since` (after Bearer, before
+coalesce; recommended stack Logger → Retry → Timeout → Bearer → Conditional).
+Timeout after pool slot via `AbortableRequest` (aborts when the client
 honors it). Pool wait for a slot is intentionally unbounded. When a progress
 sink is supplied, reports cumulative bytes as the response body is read (total
 when the response provides it). Process-wide `configure` / `shared` /
@@ -93,8 +96,8 @@ when the response provides it). Process-wide `configure` / `shared` /
 once at bootstrap.
 _Avoid_: homemade download queues; Mutex for N-way downloads; `url|headers`
 string joins for coalesce; assuming timeout covers pool queue time; treating 304
-as `$Request` or empty-body `$Internal`; synthetic chunk percents after the body
-is already fully buffered
+as `$Request` or empty-body `$Internal`; folding validators into identity;
+synthetic chunk percents after the body is already fully buffered
 
 **ImageBytesDiagnostics**:
 Soft-failure policy (silent / developer log / onEvent). Process-wide `current`

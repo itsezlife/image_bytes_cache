@@ -38,7 +38,7 @@ More: [`docs/development.md`](docs/development.md).
 | `cache/middlewares/` | Opt-in Skip-cache + Cache `Logger$Developer` | [resolve-ladder](docs/resolve-ladder.md) |
 | `image_bytes_resolver.dart` | Ladder: cache → fetch → write-through | [resolve-ladder](docs/resolve-ladder.md) |
 | `http/http_bytes_client.dart` | HTTP GET types, middleware chain, client | [resolve-ladder](docs/resolve-ladder.md) |
-| `http/middlewares/` | HTTP middlewares (`Timeout`, opt-in `Retry`, `Bearer`, `Logger$Developer`) | [resolve-ladder](docs/resolve-ladder.md) |
+| `http/middlewares/` | HTTP middlewares (`Timeout`, opt-in `Retry`, `Bearer`, `Conditional`, `Logger$Developer`) | [resolve-ladder](docs/resolve-ladder.md) |
 | `image_bytes_diagnostics.dart` | Soft-failure policy (`silent` / `developer` / `onEvent`) | [resolve-ladder](docs/resolve-ladder.md) |
 | `image_bytes_index_document.dart` | Versioned index JSON codec (`v:1`, additive HTTP `h` meta) | [storage](docs/storage.md) |
 | `image_bytes_web_keys.dart` | Synthetic `.invalid` Cache URLs + OPFS dir names | [storage](docs/storage.md) |
@@ -114,7 +114,9 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
   share one key; explicit `cacheKey` is full identity (headers on wire only).
   In-flight coalesce keys are **post-middleware** (Bearer `Authorization`
   participates; conditionals do not); durable resolve keys still use request
-  headers / `cacheKey`.
+  headers / `cacheKey`. Opt-in [HttpBytesConditionalMiddleware] seeds
+  `If-None-Match` / `If-Modified-Since` from `HttpBytesContext.etag` /
+  `lastModified` — place after Bearer, before coalesce.
 - Distinct URLs that share a basename must not collide on disk (fingerprint).
 - VM store under app **cache** root, not documents. Web ignores `directory`.
 - `MemoryImageBytesCache` / `NoOpImageBytesCache` stay usable after `close`;

@@ -81,6 +81,7 @@ lib/
         timeout_middleware.dart
         retry_middleware.dart
         bearer_middleware.dart
+        conditional_middleware.dart
         logger_middleware.dart
       retry_backoff.dart
     image_bytes_diagnostics.dart

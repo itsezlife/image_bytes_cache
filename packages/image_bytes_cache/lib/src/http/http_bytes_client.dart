@@ -69,6 +69,10 @@ extension type HttpBytesMiddlewareWrapper._(HttpBytesMiddleware _fn) {
 }
 
 /// Per-send middleware context: typed slots over a shared [Map].
+///
+/// Timeouts, retry flags, progress, and conditional validators
+/// ([etag] / [lastModified] for [HttpBytesConditionalMiddleware]) share this
+/// bag. Resolver / host code seeds slots before [HttpBytesClient.send].
 extension type HttpBytesContext(Map<String, Object?> _map) implements Map<String, Object?> {
   /// Empty context for a new send.
   factory HttpBytesContext.empty() => HttpBytesContext(<String, Object?>{});
@@ -99,6 +103,13 @@ extension type HttpBytesContext(Map<String, Object?> _map) implements Map<String
 
   /// When `true`, allow retry even if the method is not idempotent.
   static const retryNonIdempotentKey = 'retry-non-idempotent';
+
+  /// Stored `ETag` validator for [HttpBytesConditionalMiddleware] (`If-None-Match`).
+  static const etagKey = 'etag';
+
+  /// Stored `Last-Modified` validator for [HttpBytesConditionalMiddleware]
+  /// (`If-Modified-Since`).
+  static const lastModifiedKey = 'last-modified';
 
   /// Shared flight [CancelToken] for this send (AbortableRequest abort + Timeout).
   ///
@@ -154,6 +165,24 @@ extension type HttpBytesContext(Map<String, Object?> _map) implements Map<String
   /// When `true`, allow retry even if the method is not idempotent.
   bool get retryNonIdempotent => _map[retryNonIdempotentKey] == true;
   set retryNonIdempotent(bool value) => _set(retryNonIdempotentKey, value ? true : null);
+
+  /// Stored `ETag` for conditional GET. Non-empty → `If-None-Match` on the wire
+  /// when [HttpBytesConditionalMiddleware] is in the stack. Not part of coalesce
+  /// identity ([ImageCacheKey.canonicalHeaders] strips conditionals).
+  String? get etag => switch (_map[etagKey]) {
+    final String s when s.trim().isNotEmpty => s,
+    _ => null,
+  };
+  set etag(String? value) => _set(etagKey, value);
+
+  /// Stored `Last-Modified` for conditional GET. Non-empty → `If-Modified-Since`
+  /// on the wire when [HttpBytesConditionalMiddleware] is in the stack. Wire-only;
+  /// excluded from coalesce identity like [etag].
+  String? get lastModified => switch (_map[lastModifiedKey]) {
+    final String s when s.trim().isNotEmpty => s,
+    _ => null,
+  };
+  set lastModified(String? value) => _set(lastModifiedKey, value);
 
   void _set(String key, Object? value) {
     if (value == null) {

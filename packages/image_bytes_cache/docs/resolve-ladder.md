@@ -111,7 +111,7 @@ GET bodies only. Callers own disk cache and decode.
 | Knob | Default | Notes |
 | --- | --- | --- |
 | `maxConcurrent` | 6 | Further callers wait in `Pool` |
-| `middlewares` | Timeout only (~15s connect + receive) | `null` → default [HttpBytesTimeoutMiddleware]; `[]` → no Timeout. Connect bounds headers; receive bounds idle body gaps. Opt-in: [HttpBytesRetryMiddleware], [HttpBytesBearerMiddleware], [HttpBytesLoggerMiddleware$Developer] (outermost) |
+| `middlewares` | Timeout only (~15s connect + receive) | `null` → default [HttpBytesTimeoutMiddleware]; `[]` → no Timeout. Connect bounds headers; receive bounds idle body gaps. Opt-in: [HttpBytesRetryMiddleware], [HttpBytesBearerMiddleware], [HttpBytesConditionalMiddleware], [HttpBytesLoggerMiddleware$Developer] (outermost) |
 
 Middleware list order is outermost first (first entry wraps the rest). Coalesce
 runs **inside** the middleware chain (after request-mutating middleware, before
@@ -155,6 +155,12 @@ and never retries `$Timeout` / `$Cancelled` / `$Authentication`. 304 Not Modifie
 is a client success (no exception), so Retry does not retry it. Place it
 **outside** Timeout. `HttpBytesBearerMiddleware` only sets
 `Authorization: Bearer …` from `getToken` — no logout / refresh.
+`HttpBytesConditionalMiddleware` (opt-in) reads `HttpBytesContext.etag` /
+`lastModified` and sets `If-None-Match` / `If-Modified-Since` when non-empty;
+missing validators leave the GET unconditional. Place it **after** Bearer and
+**before** coalesce (innermost request-mutating layer). Conditionals stay
+wire-only (identity exclusion above). Recommended host / revalidation stack
+(outermost first): Logger → Retry → Timeout → Bearer → Conditional.
 `HttpBytesLoggerMiddleware$Developer` (opt-in) logs method/URL/outcome/latency
 via `developer.log` (`http_bytes`); place outermost to include retry time.
 
