@@ -85,8 +85,18 @@ on `IndexedImageBytesCache` under its exclusive gate).
 Internal reads can carry a `CacheReadHit` (bytes + optional retention
 timestamps + optional `ImageHttpCacheMeta`). Public `read` still returns
 `Uint8List?` by unwrapping the hit. Use `execute` when a caller needs the rich
-result or a shared `CacheContext`. Product middlewares (skip-cache, logger)
-compose on this grammar without widening the host store contract.
+result or a shared `CacheContext`.
+
+Opt-in product middlewares (list outermost first):
+
+| Middleware | Role |
+| --- | --- |
+| [ImageBytesCacheLoggerMiddleware$Developer] | Observes hit/miss/evict/prune via `developer.log` (`image_bytes_cache`); no durable IO; place outermost |
+| [ImageBytesSkipCacheMiddleware] | When `CacheContext.skipCache` (or `shouldSkip`) is true: read → miss, write → no-op; evict/prune/close still forward |
+
+Seed `CacheContext.skipCache` through `execute` (resolver plumbing will set it
+end-to-end). Public `read` / `write` on the wrapper use an empty context, so
+they only skip when `shouldSkip` decides without the flag.
 
 ## HTTP: `HttpBytesClient`
 

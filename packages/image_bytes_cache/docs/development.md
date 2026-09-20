@@ -51,6 +51,7 @@ on this path).
 | --- | --- |
 | `IImageBytesCache` / `IndexedImageBytesCache` | Hit/miss, soft LRU, TTL, capacity (entries + bytes), concurrent read vs exclusive mutate integrity, orphan healing, close; commit throw rolls RAM back (no optimistic hit) |
 | `MiddlewareImageBytesCache` | Forwards read/write/evict/prune/close through middleware over `MemoryImageBytesCache`; public read unwraps rich hits; no reclaim op; outermost-first fold |
+| Skip-cache / Cache Logger | Context/`shouldSkip` forces read miss + write no-op; logger observes hit/miss/evict/prune without altering bytes or reclaim |
 | `ImageBytesCache.open` (VM) | Real temp directory round-trip, batch commit after close/reopen, orphan reclaim, degraded open |
 | `ImageBytesCache.open` (web / Chrome) | Size routing, reopen, reclaim on Cache and OPFS |
 | `ImageBytesBlobStore$File$VM` | Worker death fails pending RPC (timeout-bounded); respawn after death; exclusive gate not stuck |
@@ -71,6 +72,9 @@ lib/
     image_bytes_resolver.dart
     cache/                        # cache middleware grammar + MiddlewareImageBytesCache
       cache_middleware.dart
+      middlewares/
+        skip_cache_middleware.dart
+        logger_middleware.dart
     http/                         # client + request/response/exception/middleware grammar
       http_bytes_client.dart
       middlewares/

@@ -18,6 +18,8 @@ library;
 export 'package:cancel_token/cancel_token.dart' show CancelToken, CancelledException;
 
 export 'src/cache/cache_middleware.dart';
+export 'src/cache/middlewares/logger_middleware.dart';
+export 'src/cache/middlewares/skip_cache_middleware.dart';
 export 'src/http/http_bytes_client.dart';
 export 'src/http/middlewares/bearer_middleware.dart';
 export 'src/http/middlewares/logger_middleware.dart';

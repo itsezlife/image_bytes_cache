@@ -67,11 +67,28 @@ extension type CacheMiddlewareWrapper._(CacheMiddleware _fn) {
 /// Mutable bag of typed slots for one [MiddlewareImageBytesCache.execute].
 ///
 /// Public [IImageBytesCache] methods on the wrapper start from
-/// [CacheContext.empty]. Policies that need flags, such as skip-cache or
-/// seeded validators, put them here. This type does not define those keys.
+/// [CacheContext.empty]. Seed [skipCache] (or other policy keys) via
+/// [MiddlewareImageBytesCache.execute] so [ImageBytesSkipCacheMiddleware]
+/// and later ladder plumbing share one story.
 extension type CacheContext(Map<String, Object?> _map) implements Map<String, Object?> {
   /// Fresh map for a new dispatch.
   factory CacheContext.empty() => CacheContext(<String, Object?>{});
+
+  /// When `true`, [ImageBytesSkipCacheMiddleware] forces read miss and write
+  /// no-op for this dispatch.
+  static const skipCacheKey = 'skip-cache';
+
+  /// Whether [ImageBytesSkipCacheMiddleware] should skip durable read/write.
+  bool get skipCache => _map[skipCacheKey] == true;
+  set skipCache(bool value) => _set(skipCacheKey, value ? true : null);
+
+  void _set(String key, Object? value) {
+    if (value == null) {
+      _map.remove(key);
+    } else {
+      _map[key] = value;
+    }
+  }
 }
 
 // --- Sealed operations (never reclaim) ---

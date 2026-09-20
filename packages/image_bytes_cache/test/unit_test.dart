@@ -1,8 +1,10 @@
 import 'package:test/test.dart';
 
+import 'cache/cache_logger_middleware_test.dart' as cache_logger_middleware_test;
 import 'cache/cache_middleware_test.dart' as cache_middleware_test;
 import 'cache/cache_test.dart' as cache_test;
 import 'cache/indexed_cache_test.dart' as indexed_cache_test;
+import 'cache/skip_cache_middleware_test.dart' as skip_cache_middleware_test;
 import 'open/open_test.dart' as open_test;
 import 'resolve/bearer_middleware_test.dart' as bearer_middleware_test;
 import 'resolve/client_test.dart' as client_test;
@@ -19,6 +21,8 @@ import 'storage/web_store_test.dart' as web_store_test;
 void main() => group('Unit', () {
   cache_test.main();
   cache_middleware_test.main();
+  skip_cache_middleware_test.main();
+  cache_logger_middleware_test.main();
   indexed_cache_test.main();
   open_test.main();
   resolver_test.main();
