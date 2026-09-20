@@ -2,8 +2,7 @@
 library;
 
 // ignore: implementation_imports
-import 'package:cached_network_image_ce/src/cache/default_cache_manager_web.dart'
-    as ce_web;
+import 'package:cached_network_image_ce/src/cache/default_cache_manager_web.dart' as ce_web;
 import 'package:http/http.dart' as http;
 
 final class CeManagerOpen {

@@ -11,8 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_bytes_cache_benchmark_compare/corpus_http.dart';
 import 'package:image_bytes_cache_benchmark_compare/paint_adapter.dart';
 
-import 'ce_paint_manager_io.dart'
-    if (dart.library.js_interop) 'ce_paint_manager_web.dart' as ce_mgr;
+import 'ce_paint_manager_io.dart' if (dart.library.js_interop) 'ce_paint_manager_web.dart' as ce_mgr;
 
 /// Opens an isolated CE paint adapter.
 Future<IPaintFeedAdapter> openCeHivePaintAdapter({
@@ -23,9 +22,7 @@ Future<IPaintFeedAdapter> openCeHivePaintAdapter({
   final opened = await ce_mgr.openCeManager(client: client);
   return _CePaintAdapter(
     id: 'ce_hive',
-    label: kIsWeb
-        ? 'cached_network_image_ce (Hive/IndexedDB)'
-        : 'cached_network_image_ce (Hive)',
+    label: kIsWeb ? 'cached_network_image_ce (Hive/IndexedDB)' : 'cached_network_image_ce (Hive)',
     manager: opened.manager,
     client: client,
     onClose: opened.onClose,

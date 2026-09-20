@@ -34,5 +34,4 @@ abstract interface class IPaintFeedAdapter {
 }
 
 /// Factory that opens an isolated paint adapter (unique temp root).
-typedef PaintFeedAdapterFactory =
-    Future<IPaintFeedAdapter> Function({Duration responseDelay});
+typedef PaintFeedAdapterFactory = Future<IPaintFeedAdapter> Function({Duration responseDelay});

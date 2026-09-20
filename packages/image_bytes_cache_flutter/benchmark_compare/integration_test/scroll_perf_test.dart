@@ -59,8 +59,7 @@ const Duration _kComplicatedHttpDelay = Duration(milliseconds: 2);
 /// Frames to advance after a fling without waiting for image futures to settle.
 const int _kComplicatedFlingPumps = 45;
 
-typedef _PaintOpen =
-    Future<IPaintFeedAdapter> Function({Duration responseDelay});
+typedef _PaintOpen = Future<IPaintFeedAdapter> Function({Duration responseDelay});
 
 final List<(String id, _PaintOpen open)> _stacks = <(String, _PaintOpen)>[
   ('ours', openOursPaintAdapter),

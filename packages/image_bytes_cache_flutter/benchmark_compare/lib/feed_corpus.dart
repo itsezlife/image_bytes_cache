@@ -52,8 +52,7 @@ final Uint8List _pngSignature = Uint8List.fromList(const <int>[
 ]);
 
 /// Memoized bodies — complicated feeds hit the same slots repeatedly.
-final Map<(int slot, int minBytes), Uint8List> _pngCache =
-    <(int, int), Uint8List>{};
+final Map<(int slot, int minBytes), Uint8List> _pngCache = <(int, int), Uint8List>{};
 
 /// Synthetic ordinary feed URL for [slot] (mod [feedOrdinaryUniqueSlots]).
 String feedUrl({int slot = 0}) {
@@ -65,12 +64,10 @@ String feedUrl({int slot = 0}) {
 String feedProseUrl() => 'https://bench.invalid/feed/prose.png';
 
 /// Complicated distinct-key URL for [slot] (not modulo-capped).
-String complicatedFeedUrl({required int slot}) =>
-    'https://bench.invalid/feed/c/$slot.png';
+String complicatedFeedUrl({required int slot}) => 'https://bench.invalid/feed/c/$slot.png';
 
 /// Complicated coalesce-burst URL for [group] (repeated in-view).
-String complicatedBurstUrl({required int group}) =>
-    'https://bench.invalid/feed/c/burst-$group.png';
+String complicatedBurstUrl({required int group}) => 'https://bench.invalid/feed/c/burst-$group.png';
 
 /// Deterministic paintable PNG for [slot], sized to at least [minBytes].
 ///
@@ -107,16 +104,14 @@ Uint8List feedPngBytes({required int slot, int minBytes = 256}) {
 }
 
 /// Min body size for a complicated slot (even = small, odd = ≥64 KiB).
-int complicatedMinBytesForSlot(int slot) =>
-    slot.isEven ? feedSmallMinBytes : feedLargeMinBytes;
+int complicatedMinBytesForSlot(int slot) => slot.isEven ? feedSmallMinBytes : feedLargeMinBytes;
 
 /// Resolves a feed corpus URL to PNG bytes, or `null` when not a feed URL.
 Uint8List? feedPayloadForUrl(String url) {
   if (url == feedProseUrl()) {
     return feedPngBytes(slot: 0, minBytes: feedSmallMinBytes);
   }
-  if (RegExp(r'^https://bench\.invalid/feed/(\d+)\.png$').firstMatch(url)
-      case final Match ordinary?) {
+  if (RegExp(r'^https://bench\.invalid/feed/(\d+)\.png$').firstMatch(url) case final Match ordinary?) {
     if (ordinary.group(1) case final String raw) {
       if (int.tryParse(raw) case final int slot) {
         return feedPngBytes(slot: slot, minBytes: feedSmallMinBytes);
@@ -136,8 +131,7 @@ Uint8List? feedPayloadForUrl(String url) {
     }
     return null;
   }
-  if (RegExp(r'^https://bench\.invalid/feed/c/(\d+)\.png$').firstMatch(url)
-      case final Match complicated?) {
+  if (RegExp(r'^https://bench\.invalid/feed/c/(\d+)\.png$').firstMatch(url) case final Match complicated?) {
     if (complicated.group(1) case final String raw) {
       if (int.tryParse(raw) case final int slot) {
         return feedPngBytes(
@@ -180,9 +174,7 @@ List<String> _complicatedUrls(int length) {
   while (urls.length < length) {
     final remaining = length - urls.length;
     final shouldBurst =
-        distinct > 0 &&
-        distinct % feedCoalesceEveryDistinct == 0 &&
-        remaining >= feedCoalesceBurstLength;
+        distinct > 0 && distinct % feedCoalesceEveryDistinct == 0 && remaining >= feedCoalesceBurstLength;
     if (shouldBurst) {
       final burst = complicatedBurstUrl(group: burstGroup++);
       for (var i = 0; i < feedCoalesceBurstLength; i++) {

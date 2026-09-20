@@ -30,8 +30,7 @@ Future<IPaintFeedAdapter> openStockCniPaintAdapter({
   final client = httpHarness.client;
 
   if (kIsWeb) {
-    final cacheKey =
-        'stock_paint_web_${DateTime.now().microsecondsSinceEpoch}';
+    final cacheKey = 'stock_paint_web_${DateTime.now().microsecondsSinceEpoch}';
     final manager = CacheManager(
       Config(
         cacheKey,
