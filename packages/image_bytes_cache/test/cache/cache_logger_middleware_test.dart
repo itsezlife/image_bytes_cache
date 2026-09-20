@@ -4,7 +4,7 @@ import 'package:image_bytes_cache/image_bytes_cache.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group(r'ImageBytesCacheLoggerMiddleware$Developer', () {
+  group(r'CacheLoggerMiddleware$Developer', () {
     test('emits hit and miss without changing stored bytes', () async {
       final lines = <String>[];
       final inner = MemoryImageBytesCache();
@@ -15,7 +15,7 @@ void main() {
       final cache = MiddlewareImageBytesCache(
         inner: inner,
         middlewares: <CacheMiddleware>[
-          ImageBytesCacheLoggerMiddleware$Developer(
+          CacheLoggerMiddleware$Developer(
             debugEmit: (message, {required level, stackTrace}) {
               lines.add(message);
             },
@@ -43,7 +43,7 @@ void main() {
       final cache = MiddlewareImageBytesCache(
         inner: inner,
         middlewares: <CacheMiddleware>[
-          ImageBytesCacheLoggerMiddleware$Developer(
+          CacheLoggerMiddleware$Developer(
             debugEmit: (message, {required level, stackTrace}) {
               lines.add(message);
             },
@@ -69,7 +69,7 @@ void main() {
       final cache = MiddlewareImageBytesCache(
         inner: inner,
         middlewares: <CacheMiddleware>[
-          ImageBytesCacheLoggerMiddleware$Developer(
+          CacheLoggerMiddleware$Developer(
             debugEmit: (message, {required level, stackTrace}) {
               throw StateError('sink broken');
             },
@@ -92,12 +92,12 @@ void main() {
       final cache = MiddlewareImageBytesCache(
         inner: inner,
         middlewares: <CacheMiddleware>[
-          ImageBytesCacheLoggerMiddleware$Developer(
+          CacheLoggerMiddleware$Developer(
             debugEmit: (message, {required level, stackTrace}) {
               lines.add(message);
             },
           ),
-          const ImageBytesSkipCacheMiddleware(),
+          const SkipCacheMiddleware(),
         ],
       );
       final context = CacheContext.empty()..skipCache = true;

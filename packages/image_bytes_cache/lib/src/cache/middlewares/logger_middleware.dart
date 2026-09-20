@@ -3,30 +3,30 @@ import 'dart:developer' as developer;
 import 'package:image_bytes_cache/src/cache/cache_middleware.dart';
 import 'package:meta/meta.dart';
 
-/// {@template image_bytes_cache_logger_middleware_developer}
+/// {@template cache_logger_middleware_developer}
 /// Opt-in cache logger that records hit / miss / evict / prune via
 /// [developer.log] (name `image_bytes_cache`).
 ///
-/// Observes only — does not alter stored bytes, open its own durable IO, or
+/// Observes only. Does not alter stored bytes, open its own durable IO, or
 /// invent a reclaim path (reclaim is not a [CacheOperation]).
 ///
 /// Place **outermost** in the middleware list so the stopwatch covers the full
-/// inner chain (including [ImageBytesSkipCacheMiddleware] when stacked inside).
+/// inner chain (including [SkipCacheMiddleware] when stacked inside).
 ///
 /// ```dart
 /// MiddlewareImageBytesCache(
 ///   inner: store,
 ///   middlewares: <CacheMiddleware>[
-///     const ImageBytesCacheLoggerMiddleware$Developer(), // outermost
-///     const ImageBytesSkipCacheMiddleware(),
+///     const CacheLoggerMiddleware$Developer(), // outermost
+///     const SkipCacheMiddleware(),
 ///   ],
 /// );
 /// ```
 /// {@endtemplate}
 @immutable
-final class ImageBytesCacheLoggerMiddleware$Developer {
-  /// {@macro image_bytes_cache_logger_middleware_developer}
-  const ImageBytesCacheLoggerMiddleware$Developer({
+final class CacheLoggerMiddleware$Developer {
+  /// {@macro cache_logger_middleware_developer}
+  const CacheLoggerMiddleware$Developer({
     this.logOperation = false,
     this.logResult = true,
     this.logError = true,
@@ -122,7 +122,7 @@ final class ImageBytesCacheLoggerMiddleware$Developer {
         stackTrace: stackTrace,
       );
     } on Object {
-      // Log sinks are best-effort — never fail the cache op.
+      // Log sinks are best-effort. Never fail the cache op.
     }
   }
 }

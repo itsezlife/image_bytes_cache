@@ -1,15 +1,15 @@
 import 'package:image_bytes_cache/src/cache/cache_middleware.dart';
 import 'package:meta/meta.dart';
 
-/// {@template image_bytes_skip_cache_middleware}
+/// {@template skip_cache_middleware}
 /// Opt-in skip-cache policy: when [CacheContext.skipCache] is true (or
 /// [shouldSkip] returns true), reads return a miss and writes are no-ops
 /// without calling the inner store.
 ///
-/// Evict, prune, and close still forward — skip means “do not read or retain
-/// bytes for this dispatch,” not “disable the store.” Does not disable HTTP;
-/// the ladder still fetches. Composes with revalidation later: skip is no
-/// durable store, not “ignore validators on a store you skipped.”
+/// Evict, prune, and close still forward. Skip means do not read or retain
+/// bytes for this dispatch, not disable the store. Does not disable HTTP; the
+/// ladder still fetches. Composes with revalidation later: skip is no durable
+/// store, not ignore validators on a store you skipped.
 ///
 /// Seed via [MiddlewareImageBytesCache.execute] with a shared [CacheContext]
 /// (resolver plumbing will set [CacheContext.skipCache] end-to-end). Public
@@ -19,7 +19,7 @@ import 'package:meta/meta.dart';
 /// ```dart
 /// final cache = MiddlewareImageBytesCache(
 ///   inner: store,
-///   middlewares: <CacheMiddleware>[const ImageBytesSkipCacheMiddleware()],
+///   middlewares: <CacheMiddleware>[const SkipCacheMiddleware()],
 /// );
 /// await cache.execute(
 ///   CacheOperation$Read(key),
@@ -28,11 +28,11 @@ import 'package:meta/meta.dart';
 /// ```
 /// {@endtemplate}
 @immutable
-final class ImageBytesSkipCacheMiddleware {
-  /// {@macro image_bytes_skip_cache_middleware}
-  const ImageBytesSkipCacheMiddleware({this.shouldSkip});
+final class SkipCacheMiddleware {
+  /// {@macro skip_cache_middleware}
+  const SkipCacheMiddleware({this.shouldSkip});
 
-  /// Optional host policy. Combined with [CacheContext.skipCache] via OR —
+  /// Optional host policy. Combined with [CacheContext.skipCache] via OR:
   /// either the context flag or a true predicate skips.
   final bool Function(CacheOperation operation, CacheContext context)? shouldSkip;
 

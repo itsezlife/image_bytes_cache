@@ -93,8 +93,8 @@ Opt-in product middlewares (list outermost first):
 
 | Middleware | Role |
 | --- | --- |
-| [ImageBytesCacheLoggerMiddleware$Developer] | Observes hit/miss/evict/prune via `developer.log` (`image_bytes_cache`); no durable IO; place outermost |
-| [ImageBytesSkipCacheMiddleware] | When `CacheContext.skipCache` (or `shouldSkip`) is true: read returns miss, write is a no-op; evict/prune/close still forward |
+| [CacheLoggerMiddleware$Developer] | Observes hit/miss/evict/prune via `developer.log` (`image_bytes_cache`); no durable IO; place outermost |
+| [SkipCacheMiddleware] | When `CacheContext.skipCache` (or `shouldSkip`) is true: read returns miss, write is a no-op; evict/prune/close still forward |
 
 Seed `CacheContext.skipCache` through `execute` (resolver plumbing will set it
 end-to-end). Public `read` / `write` on the wrapper use an empty context, so

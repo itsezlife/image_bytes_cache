@@ -4,7 +4,7 @@ import 'package:image_bytes_cache/image_bytes_cache.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('ImageBytesSkipCacheMiddleware', () {
+  group('SkipCacheMiddleware', () {
     test('seeded skip makes read miss without touching stored bytes', () async {
       final inner = MemoryImageBytesCache();
       const key = ImageCacheKey('logo');
@@ -13,7 +13,7 @@ void main() {
 
       final cache = MiddlewareImageBytesCache(
         inner: inner,
-        middlewares: <CacheMiddleware>[const ImageBytesSkipCacheMiddleware()],
+        middlewares: <CacheMiddleware>[const SkipCacheMiddleware()],
       );
       final context = CacheContext.empty()..skipCache = true;
 
@@ -28,7 +28,7 @@ void main() {
       const key = ImageCacheKey('logo');
       final cache = MiddlewareImageBytesCache(
         inner: inner,
-        middlewares: <CacheMiddleware>[const ImageBytesSkipCacheMiddleware()],
+        middlewares: <CacheMiddleware>[const SkipCacheMiddleware()],
       );
       final context = CacheContext.empty()..skipCache = true;
 
@@ -46,7 +46,7 @@ void main() {
       final bytes = Uint8List.fromList([4, 5]);
       final cache = MiddlewareImageBytesCache(
         inner: inner,
-        middlewares: <CacheMiddleware>[const ImageBytesSkipCacheMiddleware()],
+        middlewares: <CacheMiddleware>[const SkipCacheMiddleware()],
       );
 
       await cache.write(key, bytes);
@@ -63,7 +63,7 @@ void main() {
       final cache = MiddlewareImageBytesCache(
         inner: inner,
         middlewares: <CacheMiddleware>[
-          ImageBytesSkipCacheMiddleware(
+          SkipCacheMiddleware(
             shouldSkip: (operation, _) => switch (operation) {
               CacheOperation$Read(:final key) || CacheOperation$Write(:final key) => key.value.contains('secret'),
               _ => false,
