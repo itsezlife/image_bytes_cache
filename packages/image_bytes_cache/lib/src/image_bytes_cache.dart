@@ -300,13 +300,14 @@ final class ImageBytesPruneReport {
 /// HTTP validators and freshness for one cached body.
 ///
 /// Separate from [ImageBytesRetention] and from [ImageBytesRecord.writtenAt] /
-/// [ImageBytesRecord.accessedAt]. Retention evicts by age and capacity. This
-/// type is what a later revalidation path needs: ETag, Last-Modified,
-/// Cache-Control, and friends.
+/// [ImageBytesRecord.accessedAt]. Retention evicts by age and capacity. The
+/// resolve ladder uses this row for ETag / Last-Modified / Cache-Control
+/// decisions via [ImageHttpCacheFreshness].
 ///
-/// Every field is optional. A row with all nulls (or a null [ImageBytesRecord.httpCacheMeta])
-/// is a pre-ETag entry, not a decode error. The durable index codec keeps these
-/// fields additive on `v:1`. [ImageCacheKey] never hashes them.
+/// Every field is optional. A row with all nulls (or a null
+/// [ImageBytesRecord.httpCacheMeta]) is a pre-ETag entry, not a decode error.
+/// The durable index codec keeps these fields additive on `v:1`.
+/// [ImageCacheKey] never hashes them.
 @immutable
 final class ImageHttpCacheMeta {
   /// All fields default to null.

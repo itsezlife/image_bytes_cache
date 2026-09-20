@@ -5,15 +5,14 @@ import 'package:meta/meta.dart';
 /// Opt-in conditional GET layer: reads validators from [HttpBytesContext] and
 /// sets `If-None-Match` / `If-Modified-Since` on the outgoing request.
 ///
-/// Seed [HttpBytesContext.etag] and/or [HttpBytesContext.lastModified] (resolver
-/// or host). Empty / missing slots add nothing — unconditional GET stays the
-/// default. Not part of the default [HttpBytesClient] middleware list.
+/// Seed [HttpBytesContext.etag] and/or [HttpBytesContext.lastModified]
+/// (resolver or host). Empty or missing slots add nothing; the GET stays
+/// unconditional. Not part of the default [HttpBytesClient] middleware list.
 ///
-/// Place **after** [HttpBytesBearerMiddleware] (auth on the wire) and **before**
-/// coalesce (innermost request-mutating layer). Conditional headers are
-/// excluded from [ImageCacheKey] / coalesce identity, so local
-/// validators do not fragment shared flights. Recommended full stack
-/// (outermost first):
+/// Place **after** [HttpBytesBearerMiddleware] (auth on the wire) and
+/// **before** coalesce (innermost request-mutating layer). Conditional headers
+/// are excluded from [ImageCacheKey] / coalesce identity, so local validators
+/// do not fragment shared flights. Recommended full stack (outermost first):
 /// ```dart
 /// HttpBytesClient(
 ///   middlewares: <HttpBytesMiddleware>[
@@ -27,8 +26,8 @@ import 'package:meta/meta.dart';
 /// ```
 ///
 /// Works with 304 Not Modified as a first-class success on [HttpBytesClient]
-/// (headers present; body optional/ignored). Retry never retries 304 because
-/// it is not an exception.
+/// (headers present; body optional and ignored). Retry never retries 304
+/// because it is not an exception.
 /// {@endtemplate}
 @immutable
 class HttpBytesConditionalMiddleware {

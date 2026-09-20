@@ -1,11 +1,25 @@
 ## Unreleased
 
+- **CHANGED**: `ImageBytesResolver` implements HTTP freshness revalidation.
+  Fresh hits skip the network. Stale hits with ETag / Last-Modified issue a
+  conditional GET when `HttpBytesConditionalMiddleware` is on the client; 304
+  reuses cached bytes and refreshes meta; 200 write-through stores bytes plus
+  response meta. Stale without validators and misses stay unconditional. 412
+  after a conditional falls back to one unconditional GET. Default: validators
+  without Cache-Control revalidate on use; no validators retain until
+  `ImageBytesRetention`; honor `max-age` / `Expires` / `no-cache` /
+  `must-revalidate` / `immutable`. Resolve stays `Future<Uint8List>` with no
+  new open/configure ETag flags. Hosts that want conditional headers must
+  include Conditional middleware (recommended outermost first: Logger, Retry,
+  Timeout, Bearer, Conditional).
+- **ADDED**: `ImageHttpCacheFreshness`: freshness policy and response-header
+  meta helpers used by the ladder (`isFresh`, `fromResponseHeaders`,
+  `afterNotModified`).
 - **ADDED**: Opt-in `HttpBytesConditionalMiddleware`. Seed
   `HttpBytesContext.etag` and/or `lastModified` to send `If-None-Match` /
   `If-Modified-Since`. Empty context keeps an unconditional GET. Place after
-  Bearer and before coalesce. Recommended order (outermost first): Logger →
-  Retry → Timeout → Bearer → Conditional. Default client stack stays
-  Timeout-only.
+  Bearer and before coalesce. Recommended order (outermost first): Logger,
+  Retry, Timeout, Bearer, Conditional. Default client stack stays Timeout-only.
 - **CHANGED**: `ImageBytesRequest.cacheKey` sets durable cache identity and
   HTTP coalesce identity (`HttpBytesContext.identityOverride`). Headers still
   go on the wire. If the request also carries `Authorization`, audible

@@ -36,7 +36,8 @@ More: [`docs/development.md`](docs/development.md).
 | `image_bytes_cache.dart` | `ImageCacheKey`, retention, ports, `IndexedImageBytesCache`, Memory/NoOp, `ImageHttpCacheMeta` / rich hit, `ImageBytesCache` open/configure | [architecture](docs/architecture.md), [storage](docs/storage.md) |
 | `cache/cache_middleware.dart` | Sealed `CacheOperation` / result, `CacheMiddleware` fold, `MiddlewareImageBytesCache`, rich `CacheReadHit` | [resolve-ladder](docs/resolve-ladder.md) |
 | `cache/middlewares/` | Opt-in Skip-cache + Cache `Logger$Developer` | [resolve-ladder](docs/resolve-ladder.md) |
-| `image_bytes_resolver.dart` | Ladder: cache → fetch → write-through | [resolve-ladder](docs/resolve-ladder.md) |
+| `image_bytes_resolver.dart` | Ladder: freshness → conditional/unconditional GET → write-through | [resolve-ladder](docs/resolve-ladder.md) |
+| `image_http_cache_freshness.dart` | Freshness policy + response-meta helpers | [resolve-ladder](docs/resolve-ladder.md) |
 | `http/http_bytes_client.dart` | HTTP GET types, middleware chain, client | [resolve-ladder](docs/resolve-ladder.md) |
 | `http/middlewares/` | HTTP middlewares (`Timeout`, opt-in `Retry`, `Bearer`, `Conditional`, `Logger$Developer`) | [resolve-ladder](docs/resolve-ladder.md) |
 | `image_bytes_diagnostics.dart` | Soft-failure policy (`silent` / `developer` / `onEvent`) | [resolve-ladder](docs/resolve-ladder.md) |

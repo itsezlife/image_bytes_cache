@@ -70,22 +70,30 @@ _Avoid_: background eviction timers; entry-count-only budgets for large payloads
 zero or negative capacity caps
 
 **ImageBytesResolver** / **ImageBytesRequest**:
-Resolve ladder: cache read → network on miss → fire-and-forget write-through.
-Uses `HttpBytesClient.send` (`HttpBytesRequest`); typed HTTP errors propagate.
-`cacheKey` sets durable and coalesce identity (`HttpBytesContext.identityOverride`).
-`cacheKey` plus request `Authorization` emits a debug diagnostic.
-`skipCache` sets `CacheContext.skipCache` when the store is a middleware wrapper
-with Skip-cache. Empty cached payloads count as a miss. Empty durable writes
-are not retained (evict). Write-through failures do not fail paint; throwing
-diagnostics `onEvent` is swallowed so it cannot become an unhandled async
-error. Resolve remains a single [Future] of the full body, not a public byte
-stream. Optional bytes-progress reporting (cumulative / optional total) may
-ride with the request so paint adapters can surface honest download progress;
-cache hits do not invent mid-flight percents.
+Resolve ladder: rich cache read, then fresh return or conditional /
+unconditional GET, then soft write-through (bytes+meta on 200; meta refresh on
+304). Freshness is [ImageHttpCacheFreshness]: validators without Cache-Control
+revalidate on use; no validators retain until [ImageBytesRetention]; honor
+max-age / Expires / no-cache / must-revalidate / immutable. Retention is not
+HTTP freshness. Uses `HttpBytesClient.send` (`HttpBytesRequest`); typed HTTP
+errors propagate. Conditional GETs need [HttpBytesConditionalMiddleware] on the
+client. `cacheKey` sets durable and coalesce identity
+(`HttpBytesContext.identityOverride`). `cacheKey` plus request `Authorization`
+emits a debug diagnostic. `skipCache` sets `CacheContext.skipCache` when the
+store is a middleware wrapper with Skip-cache. Empty cached payloads count as a
+miss. Empty durable writes are not retained (evict). Write-through failures do
+not fail paint; throwing diagnostics `onEvent` is swallowed so it cannot become
+an unhandled async error. Resolve remains a single [Future] of the full body,
+not a public byte stream. Optional bytes-progress reporting (cumulative /
+optional total) may ride with the request so paint adapters can surface honest
+download progress; fresh cache hits do not invent mid-flight percents. 412 after
+conditional falls back to one unconditional GET. No public ETag flags on
+open/configure.
 _Avoid_: failing resolve when durable write fails; sticky empty capacity waste;
 replacing resolve with a streaming public API for progress alone; fake
 progress events that are not tied to real fetch bytes; assuming `skipCache`
-works without Skip-cache middleware
+works without Skip-cache middleware; assuming conditional headers without
+Conditional middleware; conflating retention TTL with Cache-Control freshness
 
 **HttpBytesClient**:
 HTTP GET with concurrency pool and in-flight coalesce by `ImageCacheKey`

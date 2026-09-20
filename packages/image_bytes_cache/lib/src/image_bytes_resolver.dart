@@ -7,8 +7,10 @@ import 'package:http/http.dart' as http;
 import 'package:image_bytes_cache/src/cache/cache_middleware.dart';
 import 'package:image_bytes_cache/src/cache/middlewares/skip_cache_middleware.dart';
 import 'package:image_bytes_cache/src/http/http_bytes_client.dart';
+import 'package:image_bytes_cache/src/http/middlewares/conditional_middleware.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 import 'package:image_bytes_cache/src/image_bytes_diagnostics.dart';
+import 'package:image_bytes_cache/src/image_http_cache_freshness.dart';
 import 'package:meta/meta.dart';
 
 /// Arguments for [IImageBytesResolver.resolve].
@@ -60,13 +62,13 @@ final class ImageBytesRequest {
   /// flag. Not part of [ImageCacheKey] identity.
   final bool skipCache;
 
-  /// Optional sink for honest HTTP body progress on a network miss.
+  /// Optional sink for honest HTTP body progress on a network fetch.
   ///
   /// Forwarded to [HttpBytesClient.send] only when the ladder actually
-  /// fetches. A durable non-empty cache hit returns bytes without invoking this
-  /// callback. Silence is not "0%"; do not invent mid-download percents.
-  /// Resolve remains a single [Future] of the full body; this is not a
-  /// streaming resolve API. Does not participate in [ImageCacheKey] identity
+  /// fetches. A durable non-empty fresh cache hit returns bytes without
+  /// invoking this callback. Silence is not "0%"; do not invent mid-download
+  /// percents. Resolve remains a single [Future] of the full body; this is not
+  /// a streaming resolve API. Does not participate in [ImageCacheKey] identity
   /// or in-flight coalesce.
   final ImageBytesProgressCallback? onBytesProgress;
 }
@@ -76,51 +78,71 @@ abstract interface class IImageBytesResolver {
   /// Resolves [request] to bytes.
   ///
   /// Empty cached payloads count as a miss so a bad empty write cannot poison
-  /// the ladder. After a network hit, persistence runs off the critical path;
-  /// a durable write failure is reported via [ImageBytesDiagnostics] and does
+  /// the ladder. Fresh hits return without a network hop. Stale hits with
+  /// validators issue a conditional GET when the client stack includes
+  /// [HttpBytesConditionalMiddleware]; 304 reuses cached bytes and refreshes
+  /// meta. After a network hit, persistence runs off the critical path; a
+  /// durable write failure is reported via [ImageBytesDiagnostics] and does
   /// not fail this future.
   ///
   /// Uses [HttpBytesClient.send] with [HttpBytesRequest]. Typed
   /// [HttpBytesException] failures propagate. When
   /// [ImageBytesRequest.onBytesProgress] is set, the ladder forwards it on a
-  /// network miss only. Cache hits do not synthesize progress events.
+  /// network fetch only. Fresh cache hits do not synthesize progress events.
   Future<Uint8List> resolve(ImageBytesRequest request);
 }
 
 /// Default ladder: [IImageBytesCache] then [HttpBytesClient].
 ///
-/// Order: cache read → network on miss → fire-and-forget write-through.
-/// Callers that already hold bytes from a successful GET should keep painting;
-/// storage bugs surface through [ImageBytesDiagnostics] (default silent), not
-/// by failing [resolve].
+/// ## Resolve order
+///
+/// 1. Rich cache read (skip context when [ImageBytesRequest.skipCache] is set
+///    on a [MiddlewareImageBytesCache]). Empty bytes count as a miss.
+/// 2. Fresh hit: return bytes. No network. No progress events.
+/// 3. Stale hit with validators: conditional GET (seeds
+///    [HttpBytesContext.etag] / [HttpBytesContext.lastModified]).
+/// 4. Stale without validators, or miss: unconditional GET.
+/// 5. 304: return cached bytes; soft meta refresh.
+/// 6. 200: return new bytes; soft write-through of bytes + response meta.
+/// 7. 412 after a conditional: one unconditional GET, then same as 200 / fail.
+///
+/// Freshness is [ImageHttpCacheFreshness], not [ImageBytesRetention].
+/// Conditional headers reach the wire only when the client includes
+/// [HttpBytesConditionalMiddleware]. Without it, seeded validators are ignored
+/// and the GET stays unconditional. Recommended stack (outermost first):
+/// Logger, Retry, Timeout, Bearer, Conditional.
 ///
 /// [ImageBytesRequest.cacheKey] sets durable identity and
 /// [HttpBytesContext.identityOverride] (coalesce). [ImageBytesRequest.skipCache]
-/// seeds [CacheContext.skipCache] when the store is a [MiddlewareImageBytesCache].
-/// Network goes through [HttpBytesClient.send]; typed failures are
-/// [HttpBytesException].
+/// seeds [CacheContext.skipCache] on a middleware store. Network goes through
+/// [HttpBytesClient.send]; typed failures are [HttpBytesException].
 ///
 /// [ImageBytesResolver.shared] does not snapshot the process-wide cache or
 /// client. Each [resolve] reads [ImageBytesCache.shared] and
 /// [HttpBytesClient.shared] (or their `debugShared` overrides) so configure
-/// after first paint still enables durable caching, and [ImageBytesCache.resetShared]
-/// / configure replacement cannot leave this ladder permanently bound to NoOp
-/// or a closed previous store.
+/// after first paint still enables durable caching, and
+/// [ImageBytesCache.resetShared] / configure replacement cannot leave this
+/// ladder permanently bound to NoOp or a closed previous store.
 final class ImageBytesResolver implements IImageBytesResolver {
   /// Injected wiring for tests and hosts that own their own ladder instances.
+  ///
+  /// [clock] defaults to UTC now. Pass a fixed clock when testing freshness.
   ImageBytesResolver({
     required IImageBytesCache cache,
     required HttpBytesClient client,
     ImageBytesDiagnostics? diagnostics,
+    DateTime Function()? clock,
   }) : _cacheOf = (() => cache),
        _clientOf = (() => client),
-       _diagnostics = diagnostics;
+       _diagnostics = diagnostics,
+       _clock = clock ?? _defaultClock;
 
   /// Process-wide ladder that re-reads shared cache/client on every resolve.
   ImageBytesResolver._liveShared({ImageBytesDiagnostics? diagnostics})
     : _cacheOf = ImageBytesCache.shared,
       _clientOf = HttpBytesClient.shared,
-      _diagnostics = diagnostics;
+      _diagnostics = diagnostics,
+      _clock = _defaultClock;
 
   /// Process-wide default when nothing is injected.
   ///
@@ -161,6 +183,7 @@ final class ImageBytesResolver implements IImageBytesResolver {
   final IImageBytesCache Function() _cacheOf;
   final HttpBytesClient Function() _clientOf;
   final ImageBytesDiagnostics? _diagnostics;
+  final DateTime Function() _clock;
 
   ImageBytesDiagnostics get _effectiveDiagnostics => _diagnostics ?? ImageBytesDiagnostics.current;
 
@@ -169,6 +192,7 @@ final class ImageBytesResolver implements IImageBytesResolver {
     final key = request.cacheKey ?? ImageCacheKey.fromUrl(request.url, headers: request.headers);
     final cache = _cacheOf();
     final client = _clientOf();
+    final now = _clock();
 
     // Override wins for durable + coalesce while Authorization still rides
     // the wire. Without distinct keys per tenant, hosts can share one slot
@@ -181,7 +205,7 @@ final class ImageBytesResolver implements IImageBytesResolver {
           level: ImageBytesLogLevel.debug,
           message:
               'ImageBytesRequest.cacheKey override coexists with Authorization; '
-              'override wins for durable and coalesce identity — mint distinct '
+              'override wins for durable and coalesce identity. Mint distinct '
               'keys per tenant. key=${key.value}',
           op: ImageBytesLogOp.cacheKeyAuthorization,
         ),
@@ -193,64 +217,191 @@ final class ImageBytesResolver implements IImageBytesResolver {
       false => null,
     };
 
-    final cached = await _read(cache, key, cacheContext);
-    if (cached case final bytes? when bytes.isNotEmpty) {
-      return bytes;
+    final hit = await _readRich(cache, key, cacheContext);
+    if (hit case final cached? when cached.bytes.isNotEmpty) {
+      final fresh = ImageHttpCacheFreshness.isFresh(
+        cached.httpCacheMeta,
+        now: now,
+        writtenAt: cached.writtenAt,
+      );
+      if (fresh) return cached.bytes;
+
+      if (ImageHttpCacheFreshness.hasValidators(cached.httpCacheMeta)) {
+        return _revalidate(
+          request: request,
+          key: key,
+          cache: cache,
+          client: client,
+          cacheContext: cacheContext,
+          cached: cached,
+          now: now,
+        );
+      }
+      // Stale without validators → unconditional GET below.
     }
 
+    return _fetchAndStore(
+      request: request,
+      key: key,
+      cache: cache,
+      client: client,
+      cacheContext: cacheContext,
+      now: now,
+    );
+  }
+
+  /// Conditional GET for a stale hit that still has validators.
+  ///
+  /// Seeds [HttpBytesContext.etag] / [HttpBytesContext.lastModified] for
+  /// [HttpBytesConditionalMiddleware]. On 304, returns cached bytes and soft
+  /// meta refresh. On 412, retries once without validators. On 200,
+  /// write-through new bytes and meta.
+  Future<Uint8List> _revalidate({
+    required ImageBytesRequest request,
+    required ImageCacheKey key,
+    required IImageBytesCache cache,
+    required HttpBytesClient client,
+    required CacheContext? cacheContext,
+    required ImageBytesRichHit cached,
+    required DateTime now,
+  }) async {
+    final httpContext = _seedHttpContext(request);
+    final meta = cached.httpCacheMeta;
+    if (meta?.etag case final etag? when etag.trim().isNotEmpty) {
+      httpContext.etag = etag;
+    }
+    if (meta?.lastModified case final lm? when lm.trim().isNotEmpty) {
+      httpContext.lastModified = lm;
+    }
+
+    try {
+      final response = await _send(client, request, httpContext);
+      if (response.statusCode == 304) {
+        final refreshed = ImageHttpCacheFreshness.afterNotModified(
+          cached.httpCacheMeta,
+          headers: response.headers,
+          validatedAt: now,
+        );
+        unawaited(_softWrite(cache, key, cached.bytes, cacheContext, refreshed));
+        return cached.bytes;
+      }
+
+      final bytes = await response.toBytes();
+      final nextMeta = ImageHttpCacheFreshness.fromResponseHeaders(
+        response.headers,
+        validatedAt: now,
+      );
+      unawaited(_softWrite(cache, key, bytes, cacheContext, nextMeta));
+      return bytes;
+    } on HttpBytesException$Request catch (error) {
+      // 412 Precondition Failed: one unconditional GET.
+      if (error.statusCode != 412) rethrow;
+      return _fetchAndStore(
+        request: request,
+        key: key,
+        cache: cache,
+        client: client,
+        cacheContext: cacheContext,
+        now: now,
+      );
+    }
+  }
+
+  /// Unconditional GET + soft write-through of bytes and response meta.
+  Future<Uint8List> _fetchAndStore({
+    required ImageBytesRequest request,
+    required ImageCacheKey key,
+    required IImageBytesCache cache,
+    required HttpBytesClient client,
+    required CacheContext? cacheContext,
+    required DateTime now,
+  }) async {
+    final httpContext = _seedHttpContext(request);
+    final response = await _send(client, request, httpContext);
+    final bytes = await response.toBytes();
+    final meta = ImageHttpCacheFreshness.fromResponseHeaders(
+      response.headers,
+      validatedAt: now,
+    );
+    unawaited(_softWrite(cache, key, bytes, cacheContext, meta));
+    return bytes;
+  }
+
+  HttpBytesContext _seedHttpContext(ImageBytesRequest request) {
+    final httpContext = HttpBytesContext.empty();
+    if (request.cacheKey case final override?) {
+      httpContext.identityOverride = override;
+    }
+    return httpContext;
+  }
+
+  Future<HttpBytesResponse> _send(
+    HttpBytesClient client,
+    ImageBytesRequest request,
+    HttpBytesContext httpContext,
+  ) async {
     final url = Uri.base.resolve(request.url);
     final httpRequest = http.Request('GET', url);
     if (request.headers case final h?) {
       httpRequest.headers.addAll(h);
     }
-
-    final httpContext = HttpBytesContext.empty();
-    if (request.cacheKey case final override?) {
-      httpContext.identityOverride = override;
-    }
-
-    // send → typed HttpBytesException. Ladder owns identity/context seeding.
-    final response = await client.send(
+    return client.send(
       HttpBytesRequest(httpRequest),
       context: httpContext,
       onBytesProgress: request.onBytesProgress,
     );
-    final bytes = await response.toBytes();
-
-    // Persist off the critical path. A failed write must not fail paint that
-    // already has network bytes; report so durable-store bugs stay observable
-    // when the host opts into [ImageBytesDiagnostics].
-    unawaited(
-      _write(cache, key, bytes, cacheContext).catchError((Object error, StackTrace stackTrace) {
-        _effectiveDiagnostics.report(
-          ImageBytesLogEvent(
-            level: ImageBytesLogLevel.error,
-            message: 'ImageBytesResolver write-through failed for ${key.value}: $error',
-            op: ImageBytesLogOp.writeThrough,
-            stackTrace: stackTrace,
-          ),
-        );
-      }),
-    );
-    return bytes;
   }
 
-  /// Durable read. When [context] is set, requires [MiddlewareImageBytesCache]
-  /// so [SkipCacheMiddleware] sees [CacheContext.skipCache]; otherwise public
-  /// [IImageBytesCache.read] (empty context / no skip).
-  Future<Uint8List?> _read(
+  /// Soft write-through. Failures report; they never fail [resolve].
+  Future<void> _softWrite(
+    IImageBytesCache cache,
+    ImageCacheKey key,
+    Uint8List bytes,
+    CacheContext? cacheContext,
+    ImageHttpCacheMeta? httpCacheMeta,
+  ) => _write(cache, key, bytes, cacheContext, httpCacheMeta: httpCacheMeta).catchError((
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    _effectiveDiagnostics.report(
+      ImageBytesLogEvent(
+        level: ImageBytesLogLevel.error,
+        message: 'ImageBytesResolver write-through failed for ${key.value}: $error',
+        op: ImageBytesLogOp.writeThrough,
+        stackTrace: stackTrace,
+      ),
+    );
+  });
+
+  /// Rich durable read (bytes + HTTP meta). Falls back to bytes-only stores.
+  Future<ImageBytesRichHit?> _readRich(
     IImageBytesCache cache,
     ImageCacheKey key,
     CacheContext? context,
   ) async {
+    Future<ImageBytesRichHit?> fromPlain() async {
+      if (cache case final IImageBytesRichCache rich) {
+        return rich.readRich(key);
+      }
+      return switch (await cache.read(key)) {
+        final bytes? when bytes.isNotEmpty => ImageBytesRichHit(bytes: bytes),
+        _ => null,
+      };
+    }
+
     switch (context) {
       case null:
-        return cache.read(key);
+        return fromPlain();
       case final ctx:
         if (cache case final MiddlewareImageBytesCache mw) {
           final result = await mw.execute(CacheOperation$Read(key), ctx);
           return switch (result) {
-            CacheOperationResult$Read(:final hit?) => hit.bytes,
+            CacheOperationResult$Read(:final hit?) => ImageBytesRichHit(
+              bytes: hit.bytes,
+              writtenAt: hit.writtenAt,
+              accessedAt: hit.accessedAt,
+              httpCacheMeta: hit.httpCacheMeta,
+            ),
             CacheOperationResult$Read() => null,
             _ => throw StateError(
               'Cache middleware returned ${result.runtimeType} for read; '
@@ -259,24 +410,25 @@ final class ImageBytesResolver implements IImageBytesResolver {
           };
         }
         // Plain store: skipCache has no effect without middleware that honors it.
-        return cache.read(key);
+        return fromPlain();
     }
   }
 
-  /// Durable write-through. Same context story as [_read].
+  /// Durable write-through. Same context story as [_readRich].
   Future<void> _write(
     IImageBytesCache cache,
     ImageCacheKey key,
     Uint8List bytes,
-    CacheContext? context,
-  ) async {
+    CacheContext? context, {
+    ImageHttpCacheMeta? httpCacheMeta,
+  }) async {
     switch (context) {
       case null:
-        await cache.write(key, bytes);
+        await cache.write(key, bytes, httpCacheMeta: httpCacheMeta);
       case final ctx:
         if (cache case final MiddlewareImageBytesCache mw) {
           final result = await mw.execute(
-            CacheOperation$Write(key, bytes),
+            CacheOperation$Write(key, bytes, httpCacheMeta: httpCacheMeta),
             ctx,
           );
           switch (result) {
@@ -289,7 +441,7 @@ final class ImageBytesResolver implements IImageBytesResolver {
               );
           }
         }
-        await cache.write(key, bytes);
+        await cache.write(key, bytes, httpCacheMeta: httpCacheMeta);
     }
   }
 
@@ -305,3 +457,5 @@ final class ImageBytesResolver implements IImageBytesResolver {
     }
   }
 }
+
+DateTime _defaultClock() => DateTime.now().toUtc();

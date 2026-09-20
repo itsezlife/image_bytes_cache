@@ -6,6 +6,8 @@ import 'package:http/testing.dart';
 import 'package:image_bytes_cache/src/cache/cache_middleware.dart';
 import 'package:image_bytes_cache/src/cache/middlewares/skip_cache_middleware.dart';
 import 'package:image_bytes_cache/src/http/http_bytes_client.dart';
+import 'package:image_bytes_cache/src/http/middlewares/conditional_middleware.dart';
+import 'package:image_bytes_cache/src/http/middlewares/timeout_middleware.dart';
 import 'package:image_bytes_cache/src/image_bytes_cache.dart';
 import 'package:image_bytes_cache/src/image_bytes_diagnostics.dart';
 import 'package:image_bytes_cache/src/image_bytes_resolver.dart';
@@ -456,6 +458,314 @@ void main() {
           ),
         ),
       );
+    });
+  });
+
+  group('ImageBytesResolver freshness + revalidation', () {
+    HttpBytesClient revalidatingClient(MockClientHandler handler) {
+      final client = HttpBytesClient(
+        client: MockClient(handler),
+        middlewares: <HttpBytesMiddleware>[
+          const HttpBytesTimeoutMiddleware(),
+          const HttpBytesConditionalMiddleware(),
+        ],
+      );
+      addTearDown(client.close);
+      return client;
+    }
+
+    test('fresh max-age hit skips network', () async {
+      var hits = 0;
+      final now = DateTime.utc(2024, 6, 1, 12);
+      final cache = MemoryImageBytesCache(clock: () => now);
+      const url = 'https://cdn.example.com/fresh.svg';
+      final key = ImageCacheKey.fromUrl(url);
+      final body = Uint8List.fromList([1, 2, 3]);
+      await cache.write(
+        key,
+        body,
+        httpCacheMeta: ImageHttpCacheMeta(
+          etag: '"v1"',
+          cacheControl: 'max-age=3600',
+          lastValidatedAt: now.subtract(const Duration(minutes: 5)),
+        ),
+      );
+
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: revalidatingClient((_) async {
+          hits++;
+          return http.Response.bytes(Uint8List.fromList([9]), 200);
+        }),
+        clock: () => now,
+      );
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
+      expect(hits, 0);
+    });
+
+    test('stale with ETag issues conditional GET; 304 reuses bytes and refreshes meta', () async {
+      var hits = 0;
+      http.BaseRequest? seen;
+      final now = DateTime.utc(2024, 6, 1, 12);
+      final cache = MemoryImageBytesCache(clock: () => now);
+      const url = 'https://cdn.example.com/revalidate.svg';
+      final key = ImageCacheKey.fromUrl(url);
+      final body = Uint8List.fromList([4, 5, 6]);
+      await cache.write(
+        key,
+        body,
+        httpCacheMeta: const ImageHttpCacheMeta(
+          etag: '"v1"',
+          cacheControl: 'max-age=60',
+        ),
+      );
+      // Advance past max-age via lastValidatedAt in the past.
+      await cache.write(
+        key,
+        body,
+        httpCacheMeta: ImageHttpCacheMeta(
+          etag: '"v1"',
+          cacheControl: 'max-age=60',
+          lastValidatedAt: now.subtract(const Duration(minutes: 5)),
+        ),
+      );
+
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: revalidatingClient((request) async {
+          hits++;
+          seen = request;
+          return http.Response.bytes(
+            Uint8List(0),
+            304,
+            headers: {'etag': '"v1"', 'cache-control': 'max-age=120'},
+          );
+        }),
+        clock: () => now,
+      );
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
+      expect(hits, 1);
+      expect(seen!.headers['if-none-match'], '"v1"');
+      await Future<void>.delayed(Duration.zero);
+
+      final rich = await cache.readRich(key);
+      expect(rich?.bytes, body);
+      expect(rich?.httpCacheMeta?.etag, '"v1"');
+      expect(rich?.httpCacheMeta?.cacheControl, 'max-age=120');
+      expect(rich?.httpCacheMeta?.lastValidatedAt, now);
+    });
+
+    test('stale with ETag on 200 replaces bytes and write-through meta', () async {
+      var hits = 0;
+      final now = DateTime.utc(2024, 6, 1, 12);
+      final cache = MemoryImageBytesCache(clock: () => now);
+      const url = 'https://cdn.example.com/replace.svg';
+      final key = ImageCacheKey.fromUrl(url);
+      await cache.write(
+        key,
+        Uint8List.fromList([1]),
+        httpCacheMeta: ImageHttpCacheMeta(
+          etag: '"old"',
+          lastValidatedAt: now.subtract(const Duration(days: 1)),
+        ),
+      );
+      final next = Uint8List.fromList([2, 2]);
+
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: revalidatingClient((request) async {
+          hits++;
+          expect(request.headers['if-none-match'], '"old"');
+          return http.Response.bytes(
+            next,
+            200,
+            headers: {'etag': '"new"', 'cache-control': 'max-age=30'},
+          );
+        }),
+        clock: () => now,
+      );
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), next);
+      expect(hits, 1);
+      await Future<void>.delayed(Duration.zero);
+
+      final rich = await cache.readRich(key);
+      expect(rich?.bytes, next);
+      expect(rich?.httpCacheMeta?.etag, '"new"');
+      expect(rich?.httpCacheMeta?.cacheControl, 'max-age=30');
+    });
+
+    test('stale without validators / miss uses unconditional GET', () async {
+      final seen = <String?>[];
+      final now = DateTime.utc(2024, 6, 1, 12);
+      final cache = MemoryImageBytesCache(clock: () => now);
+      const staleUrl = 'https://cdn.example.com/no-validators.svg';
+      final staleKey = ImageCacheKey.fromUrl(staleUrl);
+      await cache.write(
+        staleKey,
+        Uint8List.fromList([1]),
+        httpCacheMeta: ImageHttpCacheMeta(
+          cacheControl: 'max-age=1',
+          lastValidatedAt: now.subtract(const Duration(hours: 1)),
+        ),
+      );
+
+      final client = revalidatingClient((request) async {
+        seen.add(request.headers['if-none-match']);
+        return http.Response.bytes(
+          Uint8List.fromList([9]),
+          200,
+          headers: {'etag': '"v1"', 'cache-control': 'max-age=60'},
+        );
+      });
+      final resolver = ImageBytesResolver(cache: cache, client: client, clock: () => now);
+
+      expect(
+        await resolver.resolve(const ImageBytesRequest(url: staleUrl)),
+        Uint8List.fromList([9]),
+      );
+      expect(
+        await resolver.resolve(
+          const ImageBytesRequest(url: 'https://cdn.example.com/miss.svg'),
+        ),
+        Uint8List.fromList([9]),
+      );
+      expect(seen, [null, null]);
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        (await cache.readRich(ImageCacheKey.fromUrl('https://cdn.example.com/miss.svg')))?.httpCacheMeta?.etag,
+        '"v1"',
+      );
+    });
+
+    test('validators without Cache-Control revalidate on every use', () async {
+      var hits = 0;
+      final now = DateTime.utc(2024, 6, 1, 12);
+      final cache = MemoryImageBytesCache(clock: () => now);
+      const url = 'https://cdn.example.com/etag-only.svg';
+      final key = ImageCacheKey.fromUrl(url);
+      final body = Uint8List.fromList([7]);
+      await cache.write(
+        key,
+        body,
+        httpCacheMeta: const ImageHttpCacheMeta(etag: '"always"'),
+      );
+
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: revalidatingClient((request) async {
+          hits++;
+          expect(request.headers['if-none-match'], '"always"');
+          return http.Response.bytes(Uint8List(0), 304, headers: {'etag': '"always"'});
+        }),
+        clock: () => now,
+      );
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
+      expect(hits, 1);
+    });
+
+    test('stale Last-Modified issues If-Modified-Since; 304 reuses bytes', () async {
+      var hits = 0;
+      http.BaseRequest? seen;
+      final now = DateTime.utc(2024, 6, 1, 12);
+      const lastModified = 'Wed, 21 Oct 2015 07:28:00 GMT';
+      final cache = MemoryImageBytesCache(clock: () => now);
+      const url = 'https://cdn.example.com/last-mod.svg';
+      final key = ImageCacheKey.fromUrl(url);
+      final body = Uint8List.fromList([2, 2]);
+      await cache.write(
+        key,
+        body,
+        httpCacheMeta: ImageHttpCacheMeta(
+          lastModified: lastModified,
+          lastValidatedAt: now.subtract(const Duration(days: 1)),
+        ),
+      );
+
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: revalidatingClient((request) async {
+          hits++;
+          seen = request;
+          return http.Response.bytes(Uint8List(0), 304, headers: {'last-modified': lastModified});
+        }),
+        clock: () => now,
+      );
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
+      expect(hits, 1);
+      expect(seen!.headers['if-modified-since'], lastModified);
+      expect(seen!.headers.containsKey('if-none-match'), isFalse);
+    });
+
+    test('immutable keeps network quiet until retention', () async {
+      var hits = 0;
+      final now = DateTime.utc(2024, 6, 1, 12);
+      final cache = MemoryImageBytesCache(clock: () => now);
+      const url = 'https://cdn.example.com/immutable.svg';
+      final body = Uint8List.fromList([8, 8]);
+      await cache.write(
+        ImageCacheKey.fromUrl(url),
+        body,
+        httpCacheMeta: ImageHttpCacheMeta(
+          etag: '"static"',
+          cacheControl: 'public, max-age=0, immutable',
+          lastValidatedAt: now.subtract(const Duration(days: 40)),
+        ),
+      );
+
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: revalidatingClient((_) async {
+          hits++;
+          return http.Response.bytes(Uint8List.fromList([1]), 200);
+        }),
+        clock: () => now,
+      );
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
+      expect(hits, 0);
+    });
+
+    test('412 precondition failure falls back to one unconditional GET', () async {
+      var hits = 0;
+      final now = DateTime.utc(2024, 6, 1, 12);
+      final cache = MemoryImageBytesCache(clock: () => now);
+      const url = 'https://cdn.example.com/precondition.svg';
+      final key = ImageCacheKey.fromUrl(url);
+      await cache.write(
+        key,
+        Uint8List.fromList([1]),
+        httpCacheMeta: ImageHttpCacheMeta(
+          etag: '"stale"',
+          lastValidatedAt: now.subtract(const Duration(days: 1)),
+        ),
+      );
+      final next = Uint8List.fromList([3, 3, 3]);
+
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: revalidatingClient((request) async {
+          hits++;
+          if (request.headers.containsKey('if-none-match')) {
+            return http.Response('precondition failed', 412);
+          }
+          return http.Response.bytes(
+            next,
+            200,
+            headers: {'etag': '"ok"', 'cache-control': 'max-age=10'},
+          );
+        }),
+        clock: () => now,
+      );
+
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), next);
+      expect(hits, 2);
+      await Future<void>.delayed(Duration.zero);
+      expect((await cache.readRich(key))?.httpCacheMeta?.etag, '"ok"');
     });
   });
 

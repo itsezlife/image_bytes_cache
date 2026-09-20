@@ -30,3 +30,4 @@ export 'src/http/retry_backoff.dart';
 export 'src/image_bytes_cache.dart';
 export 'src/image_bytes_diagnostics.dart';
 export 'src/image_bytes_resolver.dart';
+export 'src/image_http_cache_freshness.dart';

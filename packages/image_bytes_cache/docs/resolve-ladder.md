@@ -68,18 +68,34 @@ resolve API. The sink does not participate in identity or coalesce.
 
 `ImageBytesResolver` order:
 
-1. Cache read (via `execute` with skip context when `skipCache` is set on a
-   middleware store; otherwise public `read`). Non-empty hit returns immediately
-   (no progress events).
-2. Empty cached payload counts as a miss. Durable stores also refuse to retain
-   empty writes (evict) and scrub sticky empty rows on read.
-3. `HttpBytesClient.send(HttpBytesRequest)` on `Uri.base.resolve(url)` on miss,
+1. Rich cache read (via `execute` with skip context when `skipCache` is set on a
+   middleware store; otherwise `readRich` / public `read`). Empty bytes count as
+   a miss.
+2. Fresh hit returns bytes immediately. No network, no progress events.
+   Freshness is `ImageHttpCacheFreshness`, separate from `ImageBytesRetention`
+   eviction.
+3. Stale hit with validators (`etag` / `lastModified`) issues a conditional GET.
+   Seeds `HttpBytesContext.etag` / `lastModified` for
+   `HttpBytesConditionalMiddleware`. Without that middleware on the client,
+   validators never reach the wire and the GET stays unconditional.
+4. Stale without validators, or miss: unconditional GET on
+   `Uri.base.resolve(url)` via `HttpBytesClient.send` (`HttpBytesRequest`),
    with identity override from `cacheKey` and `onBytesProgress` when present.
-   Typed `HttpBytesException` failures propagate.
-4. Return network bytes; schedule durable write with `unawaited` (skip context
-   when applicable). Write failure reports through `ImageBytesDiagnostics` and
-   does not fail `resolve`. A throwing host `onEvent` is swallowed inside
-   `report`.
+5. 304 returns cached bytes and soft-refreshes meta (`lastValidatedAt` plus any
+   freshness headers on the 304). Bytes are not replaced.
+6. 200 returns new bytes and soft write-through of bytes plus response-derived
+   HTTP meta.
+7. 412 after a conditional GET: one unconditional GET, then same as 200 or fail.
+8. Typed `HttpBytesException` failures propagate. Write-through failures report
+   through `ImageBytesDiagnostics` and do not fail `resolve`. A throwing host
+   `onEvent` is swallowed inside `report`.
+
+Default freshness when `Cache-Control` / `Expires` are absent: validators
+revalidate on every use; no validators retain until retention would drop the
+row. When those headers are present, honor `max-age` / `Expires` (with `Age` /
+`Date` when known); `no-cache` / `must-revalidate` always revalidate;
+`immutable` stays fresh until retention. No public ETag flags on `open` /
+`configure`.
 
 Inject cache and client in tests. Production paint usually uses
 `ImageBytesResolver.shared()`, which re-reads `ImageBytesCache.shared()` and
@@ -87,6 +103,10 @@ Inject cache and client in tests. Production paint usually uses
 does not snapshot them at first call, so configure after an early paint still
 enables durable caching, and configure replacement / `resetShared` cannot leave
 the ladder bound to NoOp or a closed previous store.
+
+Hosts that want conditional headers on the wire should include
+`HttpBytesConditionalMiddleware` on the process client. Recommended order
+(outermost first): Logger, Retry, Timeout, Bearer, Conditional.
 
 ## Cache middleware
 
