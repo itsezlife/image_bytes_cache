@@ -75,6 +75,19 @@ early paint still enables durable caching, and configure replacement /
 `resetShared` cannot leave the ladder bound to NoOp or a closed previous
 store.
 
+## Cache middleware
+
+`MiddlewareImageBytesCache` implements `IImageBytesCache` and dispatches every
+call through a `CacheMiddleware` chain into an inner store. Sealed `CacheOperation` / `CacheOperationResult` cover
+read, write, evict, prune, and close — **never reclaim** (orphan reclaim stays
+on `IndexedImageBytesCache` under its exclusive gate).
+
+Internal reads can carry a `CacheReadHit` (bytes + optional retention
+timestamps + optional `ImageHttpCacheMeta`). Public `read` still returns
+`Uint8List?` by unwrapping the hit. Use `execute` when a caller needs the rich
+result or a shared `CacheContext`. Product middlewares (skip-cache, logger)
+compose on this grammar without widening the host store contract.
+
 ## HTTP: `HttpBytesClient`
 
 GET bodies only. Callers own disk cache and decode.

@@ -1,5 +1,6 @@
 import 'package:test/test.dart';
 
+import 'cache/cache_middleware_test.dart' as cache_middleware_test;
 import 'cache/cache_test.dart' as cache_test;
 import 'cache/indexed_cache_test.dart' as indexed_cache_test;
 import 'open/open_test.dart' as open_test;
@@ -17,6 +18,7 @@ import 'storage/web_store_test.dart' as web_store_test;
 /// `test/open/open_web_test.dart` with `--platform chrome`.
 void main() => group('Unit', () {
   cache_test.main();
+  cache_middleware_test.main();
   indexed_cache_test.main();
   open_test.main();
   resolver_test.main();
