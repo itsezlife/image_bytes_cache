@@ -127,10 +127,12 @@ Cache:
 {"v":1,"e":{"<key>":{"w":ms,"a":ms,"n":byteLength,"h"?:{"et","lm","d","x","cc","ag","lv"}}}}
 ```
 
-Optional `h` is HTTP validators and freshness. A missing `h`, or missing keys
-inside it, decodes as null meta. Existing caches that never wrote `h` keep
-working. Empty meta is omitted on encode. Version stays `1` while the schema
-stays backward-compatible.
+Optional `h` is HTTP validators and freshness (`ImageHttpCacheMeta`). A missing
+`h`, or missing keys inside it, decodes as null meta. Existing caches that
+never wrote `h` keep working. Empty meta is omitted on encode. Version stays
+`1` while the schema stays backward-compatible. Freshness decisions use
+`ImageHttpCacheFreshness`; durable eviction still uses `ImageBytesRetention`
+only. Do not treat retention TTL as Cache-Control `max-age`.
 
 Unknown version or bad structure throws `FormatException`. Open paths delete
 the document, wipe blobs via `onWipe`, and report `index_wipe`. Adapters must

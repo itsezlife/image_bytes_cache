@@ -33,10 +33,14 @@ Glossary terms live in [`CONTEXT.md`](../CONTEXT.md). Storage mechanics:
 3. **Index / blob ports** (`IImageBytesIndex`, `IImageBytesBlobStore`).
    Metadata vs payload. Platform adapters implement these; the brain does not
    know about files, Cache API, or OPFS.
-4. **Resolve ladder** (`ImageBytesResolver`, `HttpBytesClient`). Cache then
-   network then fire-and-forget write-through. Soft failures go through
-   `ImageBytesDiagnostics`.
-5. **Host wiring** (`ImageBytesCache.open` / `configure` / `shared`).
+4. **Resolve ladder** (`ImageBytesResolver`, `HttpBytesClient`). Rich cache
+   read, freshness check, conditional or unconditional GET, soft write-through.
+   Soft failures and soft paths go through `ImageBytesDiagnostics`.
+5. **Middleware** (HTTP + cache). Same fold grammar (list outermost first).
+   HTTP: Timeout by default; opt-in Retry, Bearer, Conditional, Logger. Cache:
+   `MiddlewareImageBytesCache` over sealed ops; opt-in Skip-cache and Logger.
+   Reclaim is never a cache op.
+6. **Host wiring** (`ImageBytesCache.open` / `configure` / `shared`).
    Process-wide store and diagnostics policy. Conditional-import open hooks
    live under `lib/src/environment_specific/`.
 
@@ -54,7 +58,13 @@ await ImageBytesCache.configure(
     diagnostics: hostDiagnosticsPolicy,
   ),
 );
-// Optional: await HttpBytesClient.configure(HttpBytesClient(client: hostClient));
+// Optional: await HttpBytesClient.configure(HttpBytesClient(
+//   client: hostClient,
+//   middlewares: <HttpBytesMiddleware>[
+//     const HttpBytesTimeoutMiddleware(),
+//     const HttpBytesConditionalMiddleware(),
+//   ],
+// ));
 ```
 
 On web, `directory` is ignored. Hard storage failure returns
@@ -67,13 +77,15 @@ handles before that surface. Missing VM `directory` still throws
 
 `ImageBytesRequest` → `ImageBytesResolver.resolve` →
 
-1. `cache.read(key)`. Hit returns bytes; empty payload counts as miss (and
-   durable stores scrub sticky empty rows / refuse empty writes).
-2. On miss, `HttpBytesClient.getBytes` (pool + in-flight coalesce; timeout
-   after slot via `AbortableRequest`).
-3. Return network bytes immediately; `cache.write` runs unawaited. Write
-   failure reports diagnostics and does not fail the resolve future (throwing
-   host `onEvent` is swallowed).
+1. Rich cache read (skip context when `skipCache` is set on a middleware
+   store). Empty payload counts as miss.
+2. Fresh hit returns bytes with no network. Stale with validators → conditional
+   GET when Conditional middleware is on the client; 304 reuses bytes. Stale
+   without validators or miss → unconditional GET.
+3. Soft write-through of bytes+meta (200) or meta-only refresh (304). Write
+   failure reports diagnostics and does not fail resolve (throwing host
+   `onEvent` is swallowed). Transient `$Network` / `$Timeout` / `$Server` may
+   return held non-empty cached bytes (`resolve_stale_used`).
 
 `ImageBytesResolver.shared()` re-reads `ImageBytesCache.shared()` /
 `HttpBytesClient.shared()` on each resolve (not a one-shot snapshot).
@@ -83,6 +95,10 @@ handles before that surface. Missing VM `directory` still throws
 `IndexedImageBytesCache.read` probes the RAM index mirror and blob store under
 the shared (concurrent) gate. Soft LRU notes access in memory only. Durable
 meta is quiet on this path. See [storage](storage.md).
+
+HTTP freshness meta (`ImageHttpCacheMeta` under index `h`) is separate from
+`ImageBytesRetention` eviction. See [resolve-ladder](resolve-ladder.md) and
+[CONTEXT.md](../CONTEXT.md).
 
 ## Public API surface
 

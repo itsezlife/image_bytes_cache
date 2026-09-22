@@ -81,11 +81,15 @@ resolve API. The sink does not participate in identity or coalesce.
 4. Stale without validators, or miss: unconditional GET on
    `Uri.base.resolve(url)` via `HttpBytesClient.send` (`HttpBytesRequest`),
    with identity override from `cacheKey` and `onBytesProgress` when present.
+   When the ladder already held non-empty stale bytes, audible diagnostics emit
+   `resolve_unconditional` at debug. Cold misses stay quiet.
 5. 304 returns cached bytes and soft-refreshes meta (`lastValidatedAt` plus any
-   freshness headers on the 304). Bytes are not replaced.
+   freshness headers on the 304). Bytes are not replaced. Audible diagnostics
+   emit `resolve_revalidated` at debug.
 6. 200 returns new bytes and soft write-through of bytes plus response-derived
    HTTP meta.
-7. 412 after a conditional GET: one unconditional GET, then same as 200 or fail.
+7. 412 after a conditional GET: one unconditional GET, then same as 200 or fail
+   (also emits `resolve_unconditional` when cached bytes were held).
 8. `$Network` / `$Timeout` / `$Server` after a non-empty cache hit: return those
    bytes and emit `resolve_stale_used` when diagnostics are audible. Cancel,
    auth failures, 404-class `$Request`, and empty or missing cache still throw.
@@ -232,6 +236,8 @@ Ops on `ImageBytesLogEvent`:
 | `open_degraded` | Hard open failed; host received Memory store instead of throw |
 | `cache_key_authorization` | `cacheKey` set with an `Authorization` request header (debug) |
 | `resolve_stale_used` | Resolve completed with cached bytes after `$Network` / `$Timeout` / `$Server` (warning) |
+| `resolve_revalidated` | 304 path reused cached bytes and soft-refreshed meta (debug) |
+| `resolve_unconditional` | Held non-empty stale bytes and still issued an unconditional GET (debug; cold misses stay quiet) |
 
 The package does not depend on a product logger. Hosts bridge
 `onEvent` at bootstrap if they want ambient logging.

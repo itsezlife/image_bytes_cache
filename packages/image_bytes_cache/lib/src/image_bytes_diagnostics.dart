@@ -2,13 +2,13 @@ import 'dart:developer' as developer;
 
 import 'package:meta/meta.dart';
 
-/// Soft-failure reporting for the image-bytes ladder.
+/// Soft-path reporting for the image-bytes ladder.
 ///
 /// Process-wide policy lives on [current], set by [ImageBytesCache.open] /
 /// [ImageBytesCache.configure].
 ///
 /// Host [ImageBytesDiagnostics.onEvent] callbacks must not throw. If they do,
-/// [report] swallows the error so a soft-failure path (especially unawaited
+/// [report] swallows the error so a soft path (especially unawaited
 /// write-through catch) cannot become an unhandled async error in the zone.
 @immutable
 sealed class ImageBytesDiagnostics {
@@ -95,7 +95,7 @@ enum ImageBytesLogLevel {
   error,
 }
 
-/// Soft-failure path tag for [ImageBytesLogEvent.op].
+/// Soft-path tag for [ImageBytesLogEvent.op].
 extension type const ImageBytesLogOp(String value) implements String {
   /// Cache write after a successful resolve.
   static const writeThrough = ImageBytesLogOp('write_through');
@@ -115,9 +115,19 @@ extension type const ImageBytesLogOp(String value) implements String {
   /// the GET. Resolve succeeds; the failure shows up here only when diagnostics
   /// are audible.
   static const resolveStaleUsed = ImageBytesLogOp('resolve_stale_used');
+
+  /// Stale hit with validators got HTTP 304; cached bytes reused and meta
+  /// soft-refreshed. Debug only when diagnostics are audible.
+  static const resolveRevalidated = ImageBytesLogOp('resolve_revalidated');
+
+  /// Ladder already held non-empty bytes but issued an unconditional GET
+  /// (stale without validators, or 412 fallback). Cold misses stay quiet.
+  /// Debug only when diagnostics are audible.
+  static const resolveUnconditional = ImageBytesLogOp('resolve_unconditional');
 }
 
-/// One soft-failure report from the image-bytes ladder.
+/// Soft-path report from the image-bytes ladder (failures and audible resolve
+/// paths such as revalidated / stale-used / unconditional).
 @immutable
 final class ImageBytesLogEvent {
   /// Builds an event for hosts and [ImageBytesDiagnostics.developer].
@@ -134,7 +144,7 @@ final class ImageBytesLogEvent {
   /// Human-readable detail (includes key / error text when relevant).
   final String message;
 
-  /// Soft-failure path tag (see [ImageBytesLogOp]).
+  /// Soft-path tag (see [ImageBytesLogOp]).
   final ImageBytesLogOp op;
 
   /// Present when the failure carried a stack.

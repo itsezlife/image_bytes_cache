@@ -115,9 +115,12 @@ abstract interface class IImageBytesResolver {
 /// 3. Stale hit with validators: conditional GET (seeds
 ///    [HttpBytesContext.etag] / [HttpBytesContext.lastModified]).
 /// 4. Stale without validators, or miss: unconditional GET.
-/// 5. 304: return cached bytes; soft meta refresh.
+/// 5. 304: return cached bytes; soft meta refresh; emit
+///    [ImageBytesLogOp.resolveRevalidated] at debug when diagnostics are audible.
 /// 6. 200: return new bytes; soft write-through of bytes + response meta.
 /// 7. 412 after a conditional: one unconditional GET, then same as 200 / fail.
+///    Unconditional GET after held stale bytes (no validators, or 412) emits
+///    [ImageBytesLogOp.resolveUnconditional] at debug. Cold misses stay quiet.
 /// 8. `$Network` / `$Timeout` / `$Server` after a non-empty cache hit: return
 ///    those bytes and emit [ImageBytesLogOp.resolveStaleUsed] when diagnostics
 ///    are audible. Cancel, auth failures, 404-class `$Request`, and empty or
@@ -306,6 +309,13 @@ final class ImageBytesResolver implements IImageBytesResolver {
           validatedAt: now,
         );
         unawaited(_softWrite(cache, key, cached.bytes, cacheContext, refreshed));
+        _effectiveDiagnostics.report(
+          ImageBytesLogEvent(
+            level: ImageBytesLogLevel.debug,
+            message: 'ImageBytesResolver revalidated ${key.value} (304); reused cached bytes',
+            op: ImageBytesLogOp.resolveRevalidated,
+          ),
+        );
         return cached.bytes;
       }
 
@@ -342,7 +352,8 @@ final class ImageBytesResolver implements IImageBytesResolver {
   ///
   /// Pass non-empty [staleBytes] when the ladder already held a body for this
   /// key so [_serveStaleOrRethrow] can return it on transient failure. Null or
-  /// empty means the failure still throws.
+  /// empty means the failure still throws. Non-empty [staleBytes] also emits
+  /// [ImageBytesLogOp.resolveUnconditional] at debug (cold misses stay quiet).
   Future<Uint8List> _fetchAndStore({
     required ImageBytesRequest request,
     required ImageCacheKey key,
@@ -352,6 +363,18 @@ final class ImageBytesResolver implements IImageBytesResolver {
     required DateTime now,
     Uint8List? staleBytes,
   }) async {
+    if (staleBytes case final bytes? when bytes.isNotEmpty) {
+      _effectiveDiagnostics.report(
+        ImageBytesLogEvent(
+          level: ImageBytesLogLevel.debug,
+          message:
+              'ImageBytesResolver unconditional GET for ${key.value} '
+              '(held non-empty cached bytes; full fetch)',
+          op: ImageBytesLogOp.resolveUnconditional,
+        ),
+      );
+    }
+
     try {
       final httpContext = _seedHttpContext(request);
       final response = await _send(client, request, httpContext);

@@ -40,7 +40,7 @@ More: [`docs/development.md`](docs/development.md).
 | `image_http_cache_freshness.dart` | Freshness policy + response-meta helpers | [resolve-ladder](docs/resolve-ladder.md) |
 | `http/http_bytes_client.dart` | HTTP GET types, middleware chain, client | [resolve-ladder](docs/resolve-ladder.md) |
 | `http/middlewares/` | HTTP middlewares (`Timeout`, opt-in `Retry`, `Bearer`, `Conditional`, `Logger$Developer`) | [resolve-ladder](docs/resolve-ladder.md) |
-| `image_bytes_diagnostics.dart` | Soft-failure policy (`silent` / `developer` / `onEvent`) | [resolve-ladder](docs/resolve-ladder.md) |
+| `image_bytes_diagnostics.dart` | Soft-path policy (`silent` / `developer` / `onEvent`); ops include revalidated / stale-used / unconditional | [resolve-ladder](docs/resolve-ladder.md) |
 | `image_bytes_index_document.dart` | Versioned index JSON codec (`v:1`, additive HTTP `h` meta) | [storage](docs/storage.md) |
 | `image_bytes_web_keys.dart` | Synthetic `.invalid` Cache URLs + OPFS dir names | [storage](docs/storage.md) |
 | `isolate_controller.dart` | Long-lived isolate spawn/add/stream/close (VM blob IO) | [storage](docs/storage.md) |
