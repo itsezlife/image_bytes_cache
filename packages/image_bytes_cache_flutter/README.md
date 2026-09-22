@@ -19,7 +19,9 @@ Widgets here do not open files, sockets, or durable stores. Call
   No second resolve tree in widgets.
 - **Raster.** Provider for any `ImageProvider` slot (`Image`, `DecorationImage`,
   ...) plus a thin `Image`-shaped widget. Optional display-sized decode for
-  Flutter `ImageCache`; durable keys stay `ImageCacheKey`.
+  Flutter `ImageCache`; durable keys stay `ImageCacheKey`. Optional
+  placeholder / progress / fade chrome on the thin widget (or compose helpers
+  under bare `Image`).
 - **SVG.** `CachedNetworkSvgImage` with sealed load state, optional bounded
   `PageStorage` restore, and soft failures via `errorBuilder` / `onError`.
 - **Testable.** Inject an `IImageBytesResolver` in tests.
@@ -109,6 +111,64 @@ CachedNetworkBytesImage(
 
 Under `DecorationImage` (no `Image.errorBuilder`), pass `errorListener` on the
 provider if you want that same soft-failure callback.
+
+### Placeholder, progress, and fade
+
+High-level chrome on `CachedNetworkBytesImage` (or `RasterPaintCompose` under
+bare `Image` + provider). When real download chunks arrive, progress replaces
+the placeholder. Store hits stay quiet: no fake progress. Opt into any
+high-level knob and you get `ImageFadePolicy.standard`, 300ms fade-in, and
+zero fade-out unless you override them.
+
+```dart
+CachedNetworkBytesImage(
+  'https://cdn.example.com/photo.jpg',
+  width: 96,
+  height: 96,
+  placeholderBuilder: (context) => const ColoredBox(color: Color(0xFFE0E0E0)),
+  progressBuilder: (context, progress) {
+    final total = progress.expectedTotalBytes;
+    return CircularProgressIndicator(
+      value: total == null ? null : progress.cumulativeBytesLoaded / total,
+    );
+  },
+  // standard skips Flutter ImageCache sync hits (imageCache) and store-served
+  // bodies (bytesCache → ImageBytesOrigin.cache).
+  fadePolicy: ImageFadePolicy.standard,
+  fadeInDuration: const Duration(milliseconds: 300),
+  fadeOutDuration: Duration.zero,
+  errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image),
+);
+```
+
+| Fact | Public name | Meaning |
+| --- | --- | --- |
+| Sync decoded frame | `ImageFadeSkip.imageCache` | Flutter already had the bitmap (`wasSynchronouslyLoaded`) |
+| Store-served body | `ImageFadeSkip.bytesCache` | Resolve origin is `ImageBytesOrigin.cache` (no new download) |
+
+These are different facts. `standard` skips both. Force motion with
+`ImageFadePolicy.always`, or turn fade off with `ImageFadePolicy.never` / zero
+durations. Leave every high-level knob unset and the thin `Image` path stays
+as before, with no default fade.
+
+Do not combine high-level chrome with raw `frameBuilder` / `loadingBuilder`.
+That asserts. If you want the raw path instead of the example above:
+
+```dart
+CachedNetworkBytesImage(
+  'https://cdn.example.com/photo.jpg',
+  frameBuilder: (context, child, frame, wasSynchronouslyLoaded) => child,
+  loadingBuilder: (context, child, progress) {
+    if (progress == null) return child;
+    return const CircularProgressIndicator();
+  },
+);
+```
+
+`bytesCache` skip needs the load session the thin widget owns. Bare
+`DecorationImage` without a session never sees store origin, so that skip bit
+stays off unless you wire `RasterPaintCompose` and
+`CachedNetworkBytesLoadSession` yourself.
 
 ### 3. Paint a SVG
 

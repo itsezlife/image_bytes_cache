@@ -601,6 +601,12 @@ final class _FakeResolver implements IImageBytesResolver {
 
   @override
   Future<Uint8List> resolve(ImageBytesRequest request) async {
+    final result = await resolveRich(request);
+    return result.bytes;
+  }
+
+  @override
+  Future<ImageBytesResolveResult> resolveRich(ImageBytesRequest request) async {
     requests.add(request);
     if (error case final err?) {
       throw err;
@@ -614,6 +620,9 @@ final class _FakeResolver implements IImageBytesResolver {
         }
       }
     }
-    return bytes ?? Uint8List(0);
+    return ImageBytesResolveResult(
+      bytes: bytes ?? Uint8List(0),
+      origin: ImageBytesOrigin.network,
+    );
   }
 }

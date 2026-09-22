@@ -11,3 +11,5 @@ library;
 export 'src/image_provider/cached_network_bytes_image_provider.dart';
 export 'src/widget/cached_network_bytes_image.dart';
 export 'src/widget/cached_network_svg_image.dart';
+export 'src/widget/image_fade_policy.dart';
+export 'src/widget/raster_paint_compose.dart';

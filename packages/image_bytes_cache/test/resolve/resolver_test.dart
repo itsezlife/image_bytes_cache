@@ -1132,6 +1132,169 @@ void main() {
       expect(bytes, body);
     });
   });
+
+  group('ImageBytesResolver.resolveRich origin', () {
+    HttpBytesClient revalidatingClient(MockClientHandler handler) {
+      final client = HttpBytesClient(
+        client: MockClient(handler),
+        middlewares: <HttpBytesMiddleware>[
+          const HttpBytesTimeoutMiddleware(),
+          const HttpBytesConditionalMiddleware(),
+        ],
+      );
+      addTearDown(client.close);
+      return client;
+    }
+
+    test('network download body reports network; bytes match resolve', () async {
+      final body = Uint8List.fromList([7, 8, 9]);
+      final client = HttpBytesClient(
+        client: MockClient((_) async => http.Response.bytes(body, 200)),
+      );
+      addTearDown(client.close);
+
+      final resolver = ImageBytesResolver(
+        cache: MemoryImageBytesCache(),
+        client: client,
+      );
+      const request = ImageBytesRequest(url: 'https://cdn.example.com/origin-miss.svg');
+
+      final rich = await resolver.resolveRich(request);
+      expect(rich.origin, ImageBytesOrigin.network);
+      expect(rich.bytes, body);
+      expect(await resolver.resolve(request), body);
+    });
+
+    test('fresh store hit reports cache; bytes match resolve', () async {
+      var hits = 0;
+      final client = HttpBytesClient(
+        client: MockClient((_) async {
+          hits++;
+          return http.Response.bytes(Uint8List.fromList([1]), 200);
+        }),
+      );
+      addTearDown(client.close);
+
+      final cache = MemoryImageBytesCache();
+      const url = 'https://cdn.example.com/origin-fresh.svg';
+      final body = Uint8List.fromList([4, 5, 6]);
+      await cache.write(ImageCacheKey.fromUrl(url), body);
+
+      final resolver = ImageBytesResolver(cache: cache, client: client);
+      const request = ImageBytesRequest(url: url);
+
+      final rich = await resolver.resolveRich(request);
+      expect(rich.origin, ImageBytesOrigin.cache);
+      expect(rich.bytes, body);
+      expect(hits, 0);
+      expect(await resolver.resolve(request), body);
+    });
+
+    test('304 revalidated reuse reports cache', () async {
+      final now = DateTime.utc(2024, 6, 1, 12);
+      final cache = MemoryImageBytesCache(clock: () => now);
+      const url = 'https://cdn.example.com/origin-304.svg';
+      final key = ImageCacheKey.fromUrl(url);
+      final body = Uint8List.fromList([4, 5, 6]);
+      await cache.write(
+        key,
+        body,
+        httpCacheMeta: ImageHttpCacheMeta(
+          etag: '"v1"',
+          cacheControl: 'max-age=60',
+          lastValidatedAt: now.subtract(const Duration(minutes: 5)),
+        ),
+      );
+
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: revalidatingClient(
+          (_) async => http.Response.bytes(
+            Uint8List(0),
+            304,
+            headers: {'etag': '"v1"', 'cache-control': 'max-age=120'},
+          ),
+        ),
+        clock: () => now,
+      );
+
+      final rich = await resolver.resolveRich(const ImageBytesRequest(url: url));
+      expect(rich.origin, ImageBytesOrigin.cache);
+      expect(rich.bytes, body);
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
+    });
+
+    test('stale-served soft failure reports cache', () async {
+      const url = 'https://cdn.example.com/origin-stale.svg';
+      final body = Uint8List.fromList([4, 4, 4]);
+      final now = DateTime.utc(2024, 6, 1, 12);
+      final cache = MemoryImageBytesCache(clock: () => now);
+      await cache.write(
+        ImageCacheKey.fromUrl(url),
+        body,
+        httpCacheMeta: ImageHttpCacheMeta(
+          etag: '"v1"',
+          lastValidatedAt: now.subtract(const Duration(days: 1)),
+        ),
+      );
+
+      final client = HttpBytesClient(
+        client: MockClient((_) async => http.Response.bytes(Uint8List.fromList([9]), 200)),
+        middlewares: <HttpBytesMiddleware>[
+          (_) =>
+              (request, context) async => throw const HttpBytesException$Network(
+                code: 'network_error',
+                message: 'down',
+                statusCode: 0,
+              ),
+        ],
+      );
+      addTearDown(client.close);
+
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: client,
+        clock: () => now,
+      );
+
+      final rich = await resolver.resolveRich(const ImageBytesRequest(url: url));
+      expect(rich.origin, ImageBytesOrigin.cache);
+      expect(rich.bytes, body);
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
+    });
+
+    test('downloaded body after stale (200 replace) reports network', () async {
+      final now = DateTime.utc(2024, 6, 1, 12);
+      final cache = MemoryImageBytesCache(clock: () => now);
+      const url = 'https://cdn.example.com/origin-replace.svg';
+      final key = ImageCacheKey.fromUrl(url);
+      await cache.write(
+        key,
+        Uint8List.fromList([1]),
+        httpCacheMeta: ImageHttpCacheMeta(
+          etag: '"old"',
+          lastValidatedAt: now.subtract(const Duration(days: 1)),
+        ),
+      );
+      final next = Uint8List.fromList([2, 2]);
+
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: revalidatingClient(
+          (request) async {
+            expect(request.headers['if-none-match'], '"old"');
+            return http.Response.bytes(next, 200, headers: {'etag': '"new"'});
+          },
+        ),
+        clock: () => now,
+      );
+
+      final rich = await resolver.resolveRich(const ImageBytesRequest(url: url));
+      expect(rich.origin, ImageBytesOrigin.network);
+      expect(rich.bytes, next);
+      expect(await resolver.resolve(const ImageBytesRequest(url: url)), next);
+    });
+  });
 }
 
 /// Always "hits" with an empty payload (legacy sticky empty durable row).

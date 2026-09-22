@@ -75,17 +75,21 @@ handles before that surface. Missing VM `directory` still throws
 
 **Paint path:**
 
-`ImageBytesRequest` → `ImageBytesResolver.resolve` →
+`ImageBytesRequest` → `ImageBytesResolver.resolve` /
+`ImageBytesResolver.resolveRich` →
 
 1. Rich cache read (skip context when `skipCache` is set on a middleware
    store). Empty payload counts as miss.
-2. Fresh hit returns bytes with no network. Stale with validators → conditional
-   GET when Conditional middleware is on the client; 304 reuses bytes. Stale
-   without validators or miss → unconditional GET.
+2. Fresh hit returns bytes with no network (`ImageBytesOrigin.cache`). Stale
+   with validators → conditional GET when Conditional middleware is on the
+   client; 304 reuses bytes (`cache`). Stale without validators or miss →
+   unconditional GET; a downloaded 200 body is `network`.
 3. Soft write-through of bytes+meta (200) or meta-only refresh (304). Write
    failure reports diagnostics and does not fail resolve (throwing host
    `onEvent` is swallowed). Transient `$Network` / `$Timeout` / `$Server` may
-   return held non-empty cached bytes (`resolve_stale_used`).
+   return held non-empty cached bytes (`resolve_stale_used`, origin `cache`).
+   Bytes-only `resolve` returns the body; `resolveRich` adds
+   `ImageBytesOrigin` for paint. Ladder `resolve_*` diagnostics stay separate.
 
 `ImageBytesResolver.shared()` re-reads `ImageBytesCache.shared()` /
 `HttpBytesClient.shared()` on each resolve (not a one-shot snapshot).
@@ -109,7 +113,7 @@ Everything public is re-exported from `lib/image_bytes_cache.dart`:
 | `image_bytes_cache.dart` | Keys, retention, records, index/blob ports, `IImageBytesCache`, `IndexedImageBytesCache`, Memory/NoOp, `ImageBytesCache` facade |
 | `cache/cache_middleware.dart` | Cache middleware grammar: sealed ops/results (no reclaim), fold wrapper, rich read hit / HTTP cache meta |
 | `cache/middlewares/` | Opt-in Skip-cache + Cache Logger$Developer |
-| `image_bytes_resolver.dart` | `ImageBytesRequest`, `IImageBytesResolver`, `ImageBytesResolver` |
+| `image_bytes_resolver.dart` | `ImageBytesRequest`, `ImageBytesOrigin`, `ImageBytesResolveResult`, `IImageBytesResolver`, `ImageBytesResolver` |
 | `http/http_bytes_client.dart` (+ `http/middlewares/`) | Network GET: middleware chain, typed `$` errors, pool, coalesce |
 | `image_bytes_diagnostics.dart` | Soft-failure policy and events |
 

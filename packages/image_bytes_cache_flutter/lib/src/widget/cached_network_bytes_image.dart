@@ -2,31 +2,42 @@ import 'package:flutter/widgets.dart';
 import 'package:image_bytes_cache/image_bytes_cache.dart';
 
 import '../image_provider/cached_network_bytes_image_provider.dart';
+import 'image_fade_policy.dart';
+import 'raster_paint_compose.dart';
 
-/// Thin [Image] convenience over [CachedNetworkBytesImageProvider].
+/// Thin [Image] over [CachedNetworkBytesImageProvider].
 ///
 /// Call site near [Image.network]: builders, fit, semantics, gapless playback,
-/// and optional display-sized decode. [cacheWidth] / [cacheHeight] go onto the
-/// provider (Flutter [ImageCache] identity includes decode size). Do not also
-/// wrap this widget's image in [ResizeImage].
+/// optional display-sized decode. [cacheWidth] / [cacheHeight] go on the
+/// provider. Do not also wrap this widget in [ResizeImage].
 ///
-/// Soft failures use [errorBuilder] for paint and optional [onError] for a
-/// once-per-load callback (forwarded to
-/// [CachedNetworkBytesImageProvider.errorListener]).
+/// Soft failures: [errorBuilder] for paint, optional [onError].
+///
+/// Optional [placeholderBuilder], [progressBuilder], [fadePolicy],
+/// [fadeInDuration], [fadeOutDuration] call [RasterPaintCompose]. Those knobs
+/// xor raw [frameBuilder] / [loadingBuilder]. Omitting all high-level knobs
+/// keeps the thin [Image] path with no default fade.
+///
+/// High-level defaults: [ImageFadePolicy.standard], 300ms fade-in, zero
+/// fade-out. Progress replaces placeholder when real [ImageChunkEvent]s exist.
+/// State owns a [CachedNetworkBytesLoadSession] shared with the provider and
+/// compose so [ImageFadeSkip.bytesCache] works under [ImageFadePolicy.standard].
 class CachedNetworkBytesImage extends StatefulWidget {
   /// Creates a thin raster image for [url].
   ///
-  /// When [resolver] is null, uses [ImageBytesResolver.shared]. Pass an
-  /// explicit resolver in tests so the suite need not process-wide configure.
-  ///
-  /// [cacheWidth] / [cacheHeight] request a display-sized decode on the
-  /// provider; both null means full-resolution decode.
+  /// Null [resolver] uses [ImageBytesResolver.shared]. High-level chrome knobs
+  /// must not be combined with [frameBuilder] / [loadingBuilder].
   const CachedNetworkBytesImage(
     this.url, {
     super.key,
     this.scale = 1.0,
     this.frameBuilder,
     this.loadingBuilder,
+    this.placeholderBuilder,
+    this.progressBuilder,
+    this.fadePolicy,
+    this.fadeInDuration,
+    this.fadeOutDuration,
     this.errorBuilder,
     this.onError,
     this.semanticLabel,
@@ -56,12 +67,44 @@ class CachedNetworkBytesImage extends StatefulWidget {
        assert(
          cacheHeight == null || cacheHeight > 0,
          'cacheHeight must be null or > 0.',
+       ),
+       assert(
+         fadeInDuration == null || fadeInDuration >= Duration.zero,
+         'fadeInDuration must be null or non-negative.',
+       ),
+       assert(
+         fadeOutDuration == null || fadeOutDuration >= Duration.zero,
+         'fadeOutDuration must be null or non-negative.',
+       ),
+       assert(
+         (placeholderBuilder == null &&
+                 progressBuilder == null &&
+                 fadePolicy == null &&
+                 fadeInDuration == null &&
+                 fadeOutDuration == null) ||
+             (frameBuilder == null && loadingBuilder == null),
+         'High-level placeholderBuilder/progressBuilder/fade knobs are '
+         'mutually exclusive with frameBuilder/loadingBuilder.',
        );
+
+  static bool _hasHighLevelChrome({
+    required WidgetBuilder? placeholderBuilder,
+    required RasterProgressBuilder? progressBuilder,
+    required ImageFadePolicy? fadePolicy,
+    required Duration? fadeInDuration,
+    required Duration? fadeOutDuration,
+  }) {
+    return placeholderBuilder != null ||
+        progressBuilder != null ||
+        fadePolicy != null ||
+        fadeInDuration != null ||
+        fadeOutDuration != null;
+  }
 
   /// Absolute or [Uri.base]-relative image URL.
   final String url;
 
-  /// Linear scale for decoded [ImageInfo]. Forwarded to the provider.
+  /// Linear scale for decoded [ImageInfo].
   final double scale;
 
   /// Defaults to [ImageBytesResolver.shared].
@@ -70,38 +113,46 @@ class CachedNetworkBytesImage extends StatefulWidget {
   /// HTTP headers for the network hop; folded into [ImageCacheKey].
   final Map<String, String>? headers;
 
-  /// Target decode width in pixels, or null for intrinsic / height-only sizing.
-  ///
-  /// Participates in Flutter [ImageCache] identity via the provider. Does not
-  /// change durable [ImageCacheKey] or HTTP coalesce.
+  /// Display-sized decode width, or null for intrinsic / height-only.
+  /// Part of Flutter [ImageCache] identity via the provider.
   final int? cacheWidth;
 
-  /// Target decode height in pixels, or null for intrinsic / width-only sizing.
-  ///
-  /// Same identity and durable-key rules as [cacheWidth].
+  /// Display-sized decode height, or null for intrinsic / width-only.
   final int? cacheHeight;
 
-  /// Whether [cacheWidth] / [cacheHeight] may exceed intrinsic dimensions.
-  ///
-  /// Defaults to false. Forwarded to the provider; ignored when both dimensions
-  /// are null.
+  /// Whether decode dims may exceed intrinsic size. Default false.
   final bool allowUpscaling;
 
-  /// See [Image.frameBuilder].
+  /// See [Image.frameBuilder]. Xor with high-level chrome knobs.
   final ImageFrameBuilder? frameBuilder;
 
-  /// See [Image.loadingBuilder]. Network-miss [ImageChunkEvent]s are real
-  /// client bytes; durable cache hits do not invent mid-download progress.
+  /// See [Image.loadingBuilder]. Store hits invent no mid-download progress.
+  /// Xor with high-level chrome knobs.
   final ImageLoadingBuilder? loadingBuilder;
 
-  /// Built when the [ImageStream] reports a failure.
-  ///
-  /// When [onError] is set and this is null, paints an empty box. When both
-  /// are null, Flutter's default error reporting applies.
+  /// Waiting chrome when high-level knobs are on. Replaced by
+  /// [progressBuilder] on real chunks. Empty box when null but other chrome
+  /// knobs are set.
+  final WidgetBuilder? placeholderBuilder;
+
+  /// Real [ImageChunkEvent] chrome when high-level knobs are on. Quiet
+  /// resolves never call this.
+  final RasterProgressBuilder? progressBuilder;
+
+  /// Defaults to [ImageFadePolicy.standard] when high-level chrome is on.
+  final ImageFadePolicy? fadePolicy;
+
+  /// Image fade-in when high-level chrome is on. Defaults to 300ms.
+  final Duration? fadeInDuration;
+
+  /// Placeholder fade-out when high-level chrome is on. Defaults to zero.
+  final Duration? fadeOutDuration;
+
+  /// Built when the [ImageStream] fails. With [onError] alone, paints an empty
+  /// box. Both null: Flutter's default error reporting.
   final ImageErrorWidgetBuilder? errorBuilder;
 
-  /// Called once per failed load. Forwards to the provider [errorListener].
-  ///
+  /// Once per failed load. Forwards to the provider [errorListener].
   /// Uses [StackTrace.empty] when the stream supplies a null stack.
   final void Function(Object error, StackTrace stackTrace)? onError;
 
@@ -129,7 +180,6 @@ class CachedNetworkBytesImage extends StatefulWidget {
   /// How the image fits its box.
   final BoxFit? fit;
 
-  /// Alignment inside the box.
   final AlignmentGeometry alignment;
 
   /// See [Image.repeat].
@@ -150,15 +200,63 @@ class CachedNetworkBytesImage extends StatefulWidget {
   /// See [Image.filterQuality].
   final FilterQuality filterQuality;
 
+  bool get _usesHighLevelChrome => _hasHighLevelChrome(
+    placeholderBuilder: placeholderBuilder,
+    progressBuilder: progressBuilder,
+    fadePolicy: fadePolicy,
+    fadeInDuration: fadeInDuration,
+    fadeOutDuration: fadeOutDuration,
+  );
+
   @override
   State<CachedNetworkBytesImage> createState() => _CachedNetworkBytesImageState();
 }
 
 class _CachedNetworkBytesImageState extends State<CachedNetworkBytesImage> {
-  // Stable tear-off: ImageCache may reuse an equal provider, so the ephemeral
-  // listener registered on first load must read the current widget.onError.
+  // ImageCache may reuse an equal provider; the ephemeral listener must read
+  // the current widget.onError.
   void _forwardOnError(Object error, StackTrace? stackTrace) {
     widget.onError?.call(error, stackTrace ?? StackTrace.empty);
+  }
+
+  // Survives rebuilds that mint a new equal provider so compose still sees
+  // origin from the first loadImage.
+  final CachedNetworkBytesLoadSession _loadSession = CachedNetworkBytesLoadSession();
+
+  RasterPaintBuilders? _composed;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncCompose();
+  }
+
+  @override
+  void didUpdateWidget(CachedNetworkBytesImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.placeholderBuilder != widget.placeholderBuilder ||
+        oldWidget.progressBuilder != widget.progressBuilder ||
+        oldWidget.fadePolicy != widget.fadePolicy ||
+        oldWidget.fadeInDuration != widget.fadeInDuration ||
+        oldWidget.fadeOutDuration != widget.fadeOutDuration ||
+        oldWidget._usesHighLevelChrome != widget._usesHighLevelChrome) {
+      _syncCompose();
+    }
+  }
+
+  void _syncCompose() {
+    if (!widget._usesHighLevelChrome) {
+      _composed = null;
+      return;
+    }
+    _composed = RasterPaintCompose.builders(
+      placeholderBuilder: widget.placeholderBuilder,
+      progressBuilder: widget.progressBuilder,
+      fadePolicy: widget.fadePolicy ?? ImageFadePolicy.standard,
+      fadeInDuration: widget.fadeInDuration ?? RasterPaintCompose.defaultFadeInDuration,
+      fadeOutDuration: widget.fadeOutDuration ?? RasterPaintCompose.defaultFadeOutDuration,
+      originOf: () => _loadSession.origin,
+    );
   }
 
   CachedNetworkBytesImageProvider _providerFor(CachedNetworkBytesImage w) {
@@ -171,10 +269,11 @@ class _CachedNetworkBytesImageState extends State<CachedNetworkBytesImage> {
       allowUpscaling: w.allowUpscaling,
       resolver: w.resolver,
       errorListener: w.onError == null ? null : _forwardOnError,
+      loadSession: _loadSession,
     );
   }
 
-  /// [Image.errorBuilder] for paint only; [onError] is owned by the provider.
+  // Paint only; onError is owned by the provider.
   ImageErrorWidgetBuilder? get _paintErrorBuilder {
     if (widget.errorBuilder == null && widget.onError == null) {
       return null;
@@ -186,10 +285,11 @@ class _CachedNetworkBytesImageState extends State<CachedNetworkBytesImage> {
 
   @override
   Widget build(BuildContext context) {
+    final composed = _composed;
     return Image(
       image: _providerFor(widget),
-      frameBuilder: widget.frameBuilder,
-      loadingBuilder: widget.loadingBuilder,
+      frameBuilder: composed?.frameBuilder ?? widget.frameBuilder,
+      loadingBuilder: composed?.loadingBuilder ?? widget.loadingBuilder,
       errorBuilder: _paintErrorBuilder,
       semanticLabel: widget.semanticLabel,
       excludeFromSemantics: widget.excludeFromSemantics,

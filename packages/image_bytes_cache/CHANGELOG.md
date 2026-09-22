@@ -1,5 +1,12 @@
 ## Unreleased
 
+- **ADDED**: Before, hosts only got bytes from `resolve`. Now
+  `IImageBytesResolver.resolveRich` returns `ImageBytesResolveResult` (same
+  body + binary `ImageBytesOrigin`: `cache` | `network`). Bytes-only `resolve`
+  still returns the same body; custom implementors must add `resolveRich`.
+  Fresh store hit, 304 reuse, and stale-served body are `cache`. A downloaded
+  body, including a full GET after stale, is `network`.
+
 ## 0.3.1
 
 - **CHANGED**: `HttpBytesLoggerMiddleware$Developer` success lines include
