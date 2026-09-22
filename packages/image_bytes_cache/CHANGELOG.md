@@ -1,5 +1,7 @@
 ## Unreleased
 
+## 0.3.0
+
 - **ADDED**: Soft resolve-path diagnostics when audible: `resolve_revalidated`
   (debug) on 304 reuse + meta refresh; `resolve_unconditional` (debug) when the
   ladder held non-empty stale bytes and still issued a full GET (stale without
