@@ -200,8 +200,9 @@ missing validators leave the GET unconditional. Place it **after** Bearer and
 **before** coalesce (innermost request-mutating layer). Conditionals stay
 wire-only (identity exclusion above). Recommended host / revalidation stack
 (outermost first): Logger → Retry → Timeout → Bearer → Conditional.
-`HttpBytesLoggerMiddleware$Developer` (opt-in) logs method/URL/outcome/latency
-via `developer.log` (`http_bytes`); place outermost to include retry time.
+`HttpBytesLoggerMiddleware$Developer` (opt-in) logs method/URL/outcome/
+downloaded size/latency via `developer.log` (`http_bytes`); place outermost to
+include retry time.
 
 When `onBytesProgress` is supplied on the caller that **starts** the in-flight
 GET, the client reports cumulative bytes as the response body is read (`total`

@@ -1,5 +1,12 @@
 ## Unreleased
 
+## 0.3.1
+
+- **CHANGED**: `HttpBytesLoggerMiddleware$Developer` success lines include
+  downloaded size (`384 B`, `12.4 KB`, …) between status and latency. Streaming
+  responses count bytes as the body is read; buffered joiners use `body`
+  length. Mid-stream errors log size received so far when `logError` is on.
+
 ## 0.3.0
 
 - **ADDED**: Soft resolve-path diagnostics when audible: `resolve_revalidated`
