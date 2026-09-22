@@ -116,6 +116,7 @@ Everything public is re-exported from `lib/image_bytes_cache.dart`:
 | `image_bytes_resolver.dart` | `ImageBytesRequest`, `ImageBytesOrigin`, `ImageBytesResolveResult`, `IImageBytesResolver`, `ImageBytesResolver` |
 | `http/http_bytes_client.dart` (+ `http/middlewares/`) | Network GET: middleware chain, typed `$` errors, pool, coalesce |
 | `image_bytes_diagnostics.dart` | Soft-failure policy and events |
+| `util/byte_count_format.dart` | `ByteCountFormat` — compact size labels for logs (`2 B`, `1.5 KB`, …) |
 
 Deliberately **not** barrel-public (import via `src/` only when writing adapters
 or tests): environment-specific stores, `ImageBytesIndexDocumentCodec`,
