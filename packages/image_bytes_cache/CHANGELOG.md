@@ -1,4 +1,4 @@
-## Unreleased
+## 0.4.0
 
 - **ADDED**: Before, hosts only got bytes from `resolve`. Now
   `IImageBytesResolver.resolveRich` returns `ImageBytesResolveResult` (same

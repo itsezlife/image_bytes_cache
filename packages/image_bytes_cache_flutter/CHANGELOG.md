@@ -1,4 +1,4 @@
-## Unreleased
+## 0.3.0
 
 - **ADDED**: Before, raster hosts wired raw `frameBuilder` / `loadingBuilder`
   for placeholder, progress, and fade, and could only skip motion on Flutter
