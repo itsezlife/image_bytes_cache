@@ -1,5 +1,10 @@
 ## Unreleased
 
+- **ADDED**: Soft resolve-path diagnostics when audible: `resolve_revalidated`
+  (debug) on 304 reuse + meta refresh; `resolve_unconditional` (debug) when the
+  ladder held non-empty stale bytes and still issued a full GET (stale without
+  validators, or 412 fallback). Cold misses stay quiet.
+  `ImageBytesLogOp.resolveRevalidated` / `resolveUnconditional`.
 - **CHANGED**: `ImageBytesResolver` returns non-empty cached bytes when the
   HTTP attempt fails with `$Network`, `$Timeout`, or `$Server`. If Retry is on
   the client, it has already finished before `$Server` reaches the ladder.

@@ -5,15 +5,23 @@
 
 Caches remote image bytes behind an identity key. After open, meta sits in RAM.
 Blobs live on disk (VM) or Cache API / OPFS (web). Resolve is a short ladder:
-cache hit, then network with in-flight coalesce, then fire-and-forget write-through.
+fresh cache hit, conditional or unconditional GET with in-flight coalesce, then
+fire-and-forget write-through. Opt-in HTTP and cache middleware customize the
+stack without open/configure flag piles.
 
 ## Features
 
 - **Bytes product.** Store and resolve payloads. Decode stays with the host or
   paint adapters.
-- **Resolve ladder.** Cache → pooled HTTP (coalesced in-flight) → unawaited
-  write-through. Empty cached payloads count as a miss. A durable write failure
-  never fails a successful network resolve.
+- **Resolve ladder.** Fresh hit skips the network. Stale hits revalidate when
+  Conditional middleware is on the client (304 reuses bytes). Misses and
+  validator-less stale entries full-fetch. Empty cached payloads count as a
+  miss. A durable write failure never fails a successful network resolve.
+  Transient `$Network` / `$Timeout` / `$Server` can return held non-empty
+  cached bytes.
+- **Middleware.** Same outermost-first fold on HTTP and cache. Default HTTP
+  stack is Timeout-only. Opt-in Retry, Bearer, Conditional, Logger. Cache wrap
+  adds Skip-cache and Cache Logger. No reclaim as a cache op.
 - **Stable identity.** `ImageCacheKey` from the `Uri.base.resolve` canonical URL
   plus canonical headers. Distinct URLs that share a basename do not collide on
   disk. Explicit `cacheKey` is a full-identity escape hatch.
@@ -22,11 +30,13 @@ cache hit, then network with in-flight coalesce, then fire-and-forget write-thro
 - **Batched durable commits.** Write, evict, prune, TTL-delete, reclaim, and
   close share one exclusive mutate domain. Meta commits once per epoch.
 - **Retention without a timer.** TTL on read; capacity on write or prune.
+  Separate from HTTP freshness.
 - **VM and web backends.** VM: versioned JSON index + one file per key on a
   long-lived isolate worker. Web: Cache API index; blobs under 64 KiB in Cache
   API, larger blobs in OPFS (same cut as VM transferable writes).
 - **Soft diagnostics.** `silent`, `developer`, or `onEvent`. Process-wide policy
-  at open/configure.
+  at open/configure. Covers write-through, wipe, degraded open, revalidated,
+  stale-used, and unconditional soft paths.
 - **Degraded open.** Hard storage failure falls back to `MemoryImageBytesCache`
   unless `throwOnOpenFailure: true`. Partial VM workers / web handles are closed
   before degrade or rethrow.
@@ -62,8 +72,17 @@ await ImageBytesCache.configure(
 );
 
 // Optional: process-wide HTTP client (Cronet / Cupertino / shared IOClient).
-// Omit to use the default `http.Client()`.
-// await HttpBytesClient.configure(HttpBytesClient(client: myClient));
+// Omit to use the default `http.Client()` with Timeout-only middleware.
+// For ETag revalidation, add Conditional (and usually Bearer before it):
+// await HttpBytesClient.configure(
+//   HttpBytesClient(
+//     client: myClient,
+//     middlewares: <HttpBytesMiddleware>[
+//       const HttpBytesTimeoutMiddleware(),
+//       const HttpBytesConditionalMiddleware(),
+//     ],
+//   ),
+// );
 ```
 
 ### Resolve bytes
@@ -87,9 +106,13 @@ ImageBytesRequest
         │
         ▼
 ImageBytesResolver
-   ├─ cache.read(key)     hit → return bytes
+   ├─ rich cache read     fresh hit → return bytes
    ├─ empty payload       treat as miss
-   ├─ HttpBytesClient    pool + coalesce by ImageCacheKey identity
+   ├─ stale + validators  conditional GET (needs Conditional middleware)
+   │                         304 → reuse bytes + soft meta refresh
+   │                         200 → write-through bytes + meta
+   ├─ stale / miss        unconditional GET
+   ├─ flaky network       non-empty cache + $Network/$Timeout/$Server → stale bytes
    └─ unawaited write     failure → diagnostics only
 ```
 
@@ -99,12 +122,77 @@ ImageBytesResolver
 | `IImageBytesCache` | `read` / `write` / `evict` / `prune` / `close` |
 | `ImageBytesResolver` | Ladder above the store |
 | `HttpBytesClient` | GET only; pool 6; timeout 15s after a slot (`AbortableRequest`); pool wait unbounded |
-| `ImageBytesDiagnostics` | Soft failures: write-through, index wipe, degraded open |
+| `ImageBytesDiagnostics` | Soft paths: write-through, wipe, degraded open, revalidated / stale-used / unconditional |
 
 Inject cache and client in tests. Production code usually uses
 `ImageBytesResolver.shared()`, which re-reads `ImageBytesCache.shared()` and
 `HttpBytesClient.shared()` on every resolve (not a one-shot snapshot at first
 call).
+
+## Middleware
+
+HTTP and cache share one composition rule: list order is outermost first.
+`null` on `HttpBytesClient.middlewares` installs Timeout only; `[]` installs
+none.
+
+### HTTP stack
+
+Default client is Timeout-only. That is enough for a plain fetch. Conditional
+revalidation needs `HttpBytesConditionalMiddleware` on the process client, or
+validators never leave the resolver context.
+
+```dart
+await HttpBytesClient.configure(
+  HttpBytesClient(
+    client: myClient, // optional Cronet / Cupertino / shared IOClient
+    middlewares: <HttpBytesMiddleware>[
+      const HttpBytesLoggerMiddleware$Developer(), // outermost
+      HttpBytesRetryMiddleware(),
+      const HttpBytesTimeoutMiddleware(),
+      HttpBytesBearerMiddleware(getToken: getToken),
+      const HttpBytesConditionalMiddleware(), // after Bearer, before coalesce
+    ],
+  ),
+);
+```
+
+| Middleware | Default? | Notes |
+| --- | --- | --- |
+| Logger$Developer | no | Outermost so logs include retry time |
+| Retry | no | Outside Timeout; never retries 304 / cancel / timeout / auth |
+| Timeout | yes | Connect + receive idle after a pool slot; queue wait is unbounded |
+| Bearer | no | Sets `Authorization` from `getToken` only; no refresh / logout |
+| Conditional | no | Seeds `If-None-Match` / `If-Modified-Since` from context |
+
+Conditional headers are excluded from coalesce identity. Bearer-injected
+`Authorization` still participates, so different tokens do not share a flight.
+
+### Cache stack
+
+Wrap the store from `open` when you need skip-cache or cache logging. Orphan
+reclaim stays on `IndexedImageBytesCache`; there is no reclaim cache op.
+
+```dart
+final durable = await ImageBytesCache.open(directory: cacheDirectory);
+await ImageBytesCache.configure(
+  MiddlewareImageBytesCache(
+    inner: durable,
+    middlewares: <CacheMiddleware>[
+      const CacheLoggerMiddleware$Developer(), // outermost
+      const SkipCacheMiddleware(),
+    ],
+  ),
+);
+```
+
+`ImageBytesRequest.skipCache: true` only works when Skip-cache is on that
+wrapper. Plain stores ignore the flag; HTTP still runs.
+
+### Freshness vs retention
+
+`ImageHttpCacheFreshness` decides whether a hit is fresh enough to skip the
+network. `ImageBytesRetention` only caps durable age, entry count, and total
+bytes. Do not treat retention TTL as Cache-Control `max-age`.
 
 ## Retention
 
@@ -141,6 +229,9 @@ await ImageBytesCache.configure(
   ),
 );
 ```
+
+Default is `silent`. Use `developer` for `developer.log`, or `onEvent` to
+route yourself. Soft-path ops at debug/warning do not change resolve results.
 
 ## Performance
 

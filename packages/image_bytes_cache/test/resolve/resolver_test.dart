@@ -507,6 +507,7 @@ void main() {
     test('stale with ETag issues conditional GET; 304 reuses bytes and refreshes meta', () async {
       var hits = 0;
       http.BaseRequest? seen;
+      final events = <ImageBytesLogEvent>[];
       final now = DateTime.utc(2024, 6, 1, 12);
       final cache = MemoryImageBytesCache(clock: () => now);
       const url = 'https://cdn.example.com/revalidate.svg';
@@ -542,12 +543,16 @@ void main() {
             headers: {'etag': '"v1"', 'cache-control': 'max-age=120'},
           );
         }),
+        diagnostics: ImageBytesDiagnostics.onEvent(events.add),
         clock: () => now,
       );
 
       expect(await resolver.resolve(const ImageBytesRequest(url: url)), body);
       expect(hits, 1);
       expect(seen!.headers['if-none-match'], '"v1"');
+      expect(events, hasLength(1));
+      expect(events.single.op, ImageBytesLogOp.resolveRevalidated);
+      expect(events.single.level, ImageBytesLogLevel.debug);
       await Future<void>.delayed(Duration.zero);
 
       final rich = await cache.readRich(key);
@@ -599,6 +604,7 @@ void main() {
 
     test('stale without validators / miss uses unconditional GET', () async {
       final seen = <String?>[];
+      final events = <ImageBytesLogEvent>[];
       final now = DateTime.utc(2024, 6, 1, 12);
       final cache = MemoryImageBytesCache(clock: () => now);
       const staleUrl = 'https://cdn.example.com/no-validators.svg';
@@ -620,18 +626,31 @@ void main() {
           headers: {'etag': '"v1"', 'cache-control': 'max-age=60'},
         );
       });
-      final resolver = ImageBytesResolver(cache: cache, client: client, clock: () => now);
+      final resolver = ImageBytesResolver(
+        cache: cache,
+        client: client,
+        diagnostics: ImageBytesDiagnostics.onEvent(events.add),
+        clock: () => now,
+      );
 
       expect(
         await resolver.resolve(const ImageBytesRequest(url: staleUrl)),
         Uint8List.fromList([9]),
       );
+      expect(events, hasLength(1));
+      expect(events.single.op, ImageBytesLogOp.resolveUnconditional);
+      expect(events.single.level, ImageBytesLogLevel.debug);
+      events.clear();
+
       expect(
         await resolver.resolve(
           const ImageBytesRequest(url: 'https://cdn.example.com/miss.svg'),
         ),
         Uint8List.fromList([9]),
       );
+      // Cold miss stays quiet: unconditional is only useful when we already
+      // held bytes and still full-fetched.
+      expect(events, isEmpty);
       expect(seen, [null, null]);
       await Future<void>.delayed(Duration.zero);
       expect(
@@ -732,6 +751,7 @@ void main() {
 
     test('412 precondition failure falls back to one unconditional GET', () async {
       var hits = 0;
+      final events = <ImageBytesLogEvent>[];
       final now = DateTime.utc(2024, 6, 1, 12);
       final cache = MemoryImageBytesCache(clock: () => now);
       const url = 'https://cdn.example.com/precondition.svg';
@@ -759,11 +779,16 @@ void main() {
             headers: {'etag': '"ok"', 'cache-control': 'max-age=10'},
           );
         }),
+        diagnostics: ImageBytesDiagnostics.onEvent(events.add),
         clock: () => now,
       );
 
       expect(await resolver.resolve(const ImageBytesRequest(url: url)), next);
       expect(hits, 2);
+      expect(events, hasLength(1));
+      expect(events.single.op, ImageBytesLogOp.resolveUnconditional);
+      expect(events.single.level, ImageBytesLogLevel.debug);
+      expect(events.single.message, isNot(contains('without a conditional path')));
       await Future<void>.delayed(Duration.zero);
       expect((await cache.readRich(key))?.httpCacheMeta?.etag, '"ok"');
     });
