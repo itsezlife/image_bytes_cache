@@ -1,13 +1,16 @@
 ## Unreleased
 
-- **ADDED**: Raster paint chrome on `CachedNetworkBytesImage` and
-  `RasterPaintCompose`: `placeholderBuilder`, `progressBuilder`,
-  `ImageFadePolicy` / `ImageFadeSkip` (`imageCache` | `bytesCache`),
-  `fadeInDuration` / `fadeOutDuration` (defaults 300ms in / zero out). Progress
-  replaces placeholder on real chunks; quiet resolves invent none. High-level
-  knobs xor raw `frameBuilder` / `loadingBuilder`. Under `standard`,
-  `ImageBytesOrigin.cache` skips fade even on async decode; missing origin does
-  not skip for `bytesCache`.
+- **ADDED**: Before, raster hosts wired raw `frameBuilder` / `loadingBuilder`
+  for placeholder, progress, and fade, and could only skip motion on Flutter
+  `ImageCache` sync hits. Now `CachedNetworkBytesImage` and
+  `RasterPaintCompose` expose `placeholderBuilder`, `progressBuilder`,
+  `ImageFadePolicy` / `ImageFadeSkip` (`imageCache` | `bytesCache`), and
+  `fadeInDuration` / `fadeOutDuration` (defaults 300ms in / zero out when any
+  high-level knob is set). Progress replaces placeholder on real chunks; quiet
+  resolves invent none. High-level knobs are mutually exclusive with raw
+  `frameBuilder` / `loadingBuilder`. Under `standard`, `ImageBytesOrigin.cache`
+  skips fade even on async decode; missing origin does not skip for
+  `bytesCache`.
 - **ADDED**: `CachedNetworkBytesLoadSession` on
   `CachedNetworkBytesImageProvider` (thin widget wires it). Rich resolve
   records origin; compose reads via `originOf`. Omit for bare

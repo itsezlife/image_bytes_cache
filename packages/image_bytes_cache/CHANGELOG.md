@@ -1,12 +1,11 @@
 ## Unreleased
 
-- **ADDED**: `ImageBytesOrigin` (`network` | `cache`) and
-  `ImageBytesResolveResult` (bytes + origin) from
-  `IImageBytesResolver.resolveRich`. Bytes-only `resolve` still returns the
-  same body. Custom `IImageBytesResolver` implementors must add `resolveRich`.
+- **ADDED**: Before, hosts only got bytes from `resolve`. Now
+  `IImageBytesResolver.resolveRich` returns `ImageBytesResolveResult` (same
+  body + binary `ImageBytesOrigin`: `cache` | `network`). Bytes-only `resolve`
+  still returns the same body; custom implementors must add `resolveRich`.
   Fresh store hit, 304 reuse, and stale-served body are `cache`. A downloaded
-  body, including a full GET after stale, is `network`. Ladder `resolve_*`
-  diagnostics stay separate from origin.
+  body, including a full GET after stale, is `network`.
 
 ## 0.3.1
 

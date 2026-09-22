@@ -80,13 +80,16 @@ handles before that surface. Missing VM `directory` still throws
 
 1. Rich cache read (skip context when `skipCache` is set on a middleware
    store). Empty payload counts as miss.
-2. Fresh hit returns bytes with no network. Stale with validators → conditional
-   GET when Conditional middleware is on the client; 304 reuses bytes. Stale
-   without validators or miss → unconditional GET.
+2. Fresh hit returns bytes with no network (`ImageBytesOrigin.cache`). Stale
+   with validators → conditional GET when Conditional middleware is on the
+   client; 304 reuses bytes (`cache`). Stale without validators or miss →
+   unconditional GET; a downloaded 200 body is `network`.
 3. Soft write-through of bytes+meta (200) or meta-only refresh (304). Write
    failure reports diagnostics and does not fail resolve (throwing host
    `onEvent` is swallowed). Transient `$Network` / `$Timeout` / `$Server` may
-   return held non-empty cached bytes (`resolve_stale_used`).
+   return held non-empty cached bytes (`resolve_stale_used`, origin `cache`).
+   Bytes-only `resolve` returns the body; `resolveRich` adds
+   `ImageBytesOrigin` for paint. Ladder `resolve_*` diagnostics stay separate.
 
 `ImageBytesResolver.shared()` re-reads `ImageBytesCache.shared()` /
 `HttpBytesClient.shared()` on each resolve (not a one-shot snapshot).

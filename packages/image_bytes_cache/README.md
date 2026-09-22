@@ -93,7 +93,21 @@ final bytes = await ImageBytesResolver.shared().resolve(
     url: 'https://cdn.example.com/logo.png',
   ),
 );
+
+// When paint needs origin (fade skip):
+final rich = await ImageBytesResolver.shared().resolveRich(
+  ImageBytesRequest(
+    url: 'https://cdn.example.com/logo.png',
+  ),
+);
+// rich.bytes — same body as resolve
+// rich.origin — ImageBytesOrigin.cache | .network
 ```
+
+`ImageBytesOrigin.cache` means the body was served without a new download
+(fresh store hit, 304 reuse, or stale-served soft failure). `network` means a
+downloaded body. Use it for paint policy. Soft-path detail stays on
+`ImageBytesDiagnostics`.
 
 For Flutter paint, use
 [`image_bytes_cache_flutter`](../image_bytes_cache_flutter/) after the same
@@ -106,13 +120,13 @@ ImageBytesRequest
         │
         ▼
 ImageBytesResolver
-   ├─ rich cache read     fresh hit → return bytes
+   ├─ rich cache read     fresh hit → bytes + origin.cache
    ├─ empty payload       treat as miss
    ├─ stale + validators  conditional GET (needs Conditional middleware)
-   │                         304 → reuse bytes + soft meta refresh
-   │                         200 → write-through bytes + meta
-   ├─ stale / miss        unconditional GET
-   ├─ flaky network       non-empty cache + $Network/$Timeout/$Server → stale bytes
+   │                         304 → reuse bytes + soft meta refresh (origin.cache)
+   │                         200 → write-through bytes + meta (origin.network)
+   ├─ stale / miss        unconditional GET → origin.network on 200
+   ├─ flaky network       non-empty cache + $Network/$Timeout/$Server → stale bytes (origin.cache)
    └─ unawaited write     failure → diagnostics only
 ```
 
@@ -120,7 +134,8 @@ ImageBytesResolver
 | --- | --- |
 | `ImageCacheKey` | Filename-safe identity; shared with HTTP coalesce |
 | `IImageBytesCache` | `read` / `write` / `evict` / `prune` / `close` |
-| `ImageBytesResolver` | Ladder above the store |
+| `ImageBytesResolver` | Ladder above the store (`resolve` / `resolveRich`) |
+| `ImageBytesOrigin` | Paint origin (`cache` \| `network`); separate from ladder log ops |
 | `HttpBytesClient` | GET only; pool 6; timeout 15s after a slot (`AbortableRequest`); pool wait unbounded |
 | `ImageBytesDiagnostics` | Soft paths: write-through, wipe, degraded open, revalidated / stale-used / unconditional |
 
