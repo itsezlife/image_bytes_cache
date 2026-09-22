@@ -383,15 +383,44 @@ void main() {
         expect(rasterFade(), findsNothing);
       });
 
-      testWidgets('absent origin does not skip fade under standard', (tester) async {
-        // Thin widget leaves origin unwired (ticket 03). standard declares
-        // bytesCache but missing origin must not skip — fade still plays.
-        resolver.bytes = oneByOnePngBytes();
+      testWidgets('bytesCache skip: store origin skips fade under standard', (
+        tester,
+      ) async {
+        // Async decode (wasSynchronouslyLoaded false) but resolve served from
+        // the bytes store — standard must skip like a warm ImageCache hit.
+        resolver
+          ..bytes = oneByOnePngBytes()
+          ..origin = ImageBytesOrigin.cache
+          ..emitProgress = false;
 
         await tester.pumpWidget(
           wrapChrome(
             CachedNetworkBytesImage(
-              'https://cdn.example.com/no-origin.png',
+              'https://cdn.example.com/store-hit.png',
+              resolver: resolver,
+              fadePolicy: ImageFadePolicy.standard,
+              fadeInDuration: const Duration(milliseconds: 300),
+            ),
+          ),
+        );
+        await settle(tester, () => find.byType(RawImage).evaluate().isNotEmpty);
+        await tester.pump();
+
+        expect(find.byType(RawImage), findsOneWidget);
+        expect(rasterFade(), findsNothing);
+      });
+
+      testWidgets('bytesCache: network origin still fades under standard', (
+        tester,
+      ) async {
+        resolver
+          ..bytes = oneByOnePngBytes()
+          ..origin = ImageBytesOrigin.network;
+
+        await tester.pumpWidget(
+          wrapChrome(
+            CachedNetworkBytesImage(
+              'https://cdn.example.com/network-fade.png',
               resolver: resolver,
               fadePolicy: ImageFadePolicy.standard,
               fadeInDuration: const Duration(milliseconds: 300),

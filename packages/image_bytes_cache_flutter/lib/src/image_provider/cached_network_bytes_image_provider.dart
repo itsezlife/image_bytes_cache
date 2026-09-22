@@ -5,45 +5,73 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:image_bytes_cache/image_bytes_cache.dart';
 
-/// [ImageProvider] for remote rasters resolved through [IImageBytesResolver].
+/// Holds [ImageBytesOrigin] for one provider load so compose can honor
+/// [ImageFadeSkip.bytesCache] without subclassing [ImageInfo].
 ///
-/// Asks [resolver] for bytes, then decodes with Flutter's image pipeline
-/// (PNG, JPEG, WebP, multi-frame GIF, and any other codec the engine accepts).
+/// Pass the same instance to [CachedNetworkBytesImageProvider.loadSession] and
+/// to [RasterPaintCompose.builders] `originOf`. Omit it under
+/// [DecorationImage]: resolve and decode still run; `bytesCache` stays inert.
+/// Late completes from a superseded [loadImage] do not overwrite [origin].
+/// Not part of Flutter [ImageCache] identity.
+final class CachedNetworkBytesLoadSession {
+  ImageBytesOrigin? _origin;
+  int _generation = 0;
+
+  /// Last recorded origin for the current load, or `null` until rich resolve
+  /// finishes (and after each new [loadImage] begins).
+  ImageBytesOrigin? get origin => _origin;
+
+  // Bump generation and clear origin so a stale async complete cannot win.
+  int _beginLoad() {
+    _generation += 1;
+    _origin = null;
+    return _generation;
+  }
+
+  void _recordOrigin(int generation, ImageBytesOrigin origin) {
+    if (generation != _generation) {
+      return;
+    }
+    _origin = origin;
+  }
+}
+
+/// [ImageProvider] that resolves remote bytes via [IImageBytesResolver], then
+/// decodes with Flutter's codecs (PNG, JPEG, WebP, GIF, …).
+///
 /// Does not open files or sockets. Unlike [CachedNetworkSvgImage], does not
-/// mirror bodies into [PageStorage]; remounts rely on the durable ladder plus
-/// Flutter's [ImageCache].
+/// mirror bodies into [PageStorage].
 ///
-/// Network-miss progress from [ImageBytesRequest.onBytesProgress] becomes
-/// [ImageChunkEvent]s for [Image.loadingBuilder]. A durable cache hit stays
-/// quiet; that silence is not 0% progress.
+/// Uses [IImageBytesResolver.resolveRich]. When [loadSession] is set, records
+/// [ImageBytesOrigin] after resolve. Omitting the session is the bare
+/// DecorationImage path: stock [ImageInfo], no origin side-channel.
 ///
-/// Flutter [ImageCache] equality is [cacheKey], [scale], and optional decode
-/// size ([cacheWidth] / [cacheHeight] / [allowUpscaling]). Durable store and
-/// HTTP coalesce identity stay [ImageCacheKey] alone, always
-/// [ImageCacheKey.fromUrl] of [url] + [headers]. This type does not take an
-/// [ImageBytesRequest.cacheKey] override. [resolver] and [errorListener] are
-/// wiring only and do not participate in equality.
+/// Network-miss [ImageBytesRequest.onBytesProgress] becomes [ImageChunkEvent]s.
+/// A store hit stays quiet; that silence is not 0% progress.
 ///
-/// Prefer [cacheWidth] / [cacheHeight] (or [.sized]) when the host needs
-/// display-sized bitmaps under [DecorationImage], [CircleAvatar], or any
-/// non-[Image] slot. Wrapping an **unsized** provider in [ResizeImage] is
-/// fine; stacking [ResizeImage] on a provider that already sets decode size
-/// asserts.
+/// Flutter [ImageCache] identity is [cacheKey] + [scale] + optional decode size
+/// ([cacheWidth] / [cacheHeight] / [allowUpscaling]). Durable store and HTTP
+/// coalesce stay [ImageCacheKey] alone ([ImageCacheKey.fromUrl] of [url] +
+/// [headers]). This type never takes an [ImageBytesRequest.cacheKey] override.
+/// [resolver], [errorListener], and [loadSession] are wiring only and are
+/// omitted from [operator ==].
+///
+/// Prefer [cacheWidth] / [cacheHeight] (or [.sized]) for display-sized bitmaps
+/// under [DecorationImage] or other non-[Image] slots. Wrap an **unsized**
+/// provider in [ResizeImage]; stacking [ResizeImage] on an already-sized
+/// provider asserts.
 ///
 /// Resolve, empty-body, and decode failures surface on the [ImageStream].
-/// Optional [errorListener] reports those soft failures when the host has no
-/// [Image.errorBuilder] (for example [DecorationImage] alone).
+/// Optional [errorListener] covers slots without [Image.errorBuilder]
+/// (DecorationImage alone).
 @immutable
 class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesImageProvider> {
   /// Creates a provider for [url].
   ///
-  /// When [resolver] is null, uses [ImageBytesResolver.shared]. Pass an
-  /// explicit resolver in tests so the suite need not process-wide configure.
-  ///
-  /// When [cacheWidth] and [cacheHeight] are both null, decode is full
-  /// resolution and external [ResizeImage] wrapping is valid. Supply either
-  /// dimension to decode at display size and split Flutter [ImageCache]
-  /// identity from the unsized case.
+  /// Null [resolver] uses [ImageBytesResolver.shared]. Both decode dims null
+  /// means full-resolution decode (external [ResizeImage] is valid). Either
+  /// dim set decodes at display size and splits Flutter [ImageCache] identity.
+  /// Pass [loadSession] when compose needs origin for `bytesCache`.
   const CachedNetworkBytesImageProvider(
     this.url, {
     this.scale = 1.0,
@@ -53,6 +81,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
     this.allowUpscaling = false,
     this.resolver,
     this.errorListener,
+    this.loadSession,
   }) : assert(
          cacheWidth == null || cacheWidth > 0,
          'cacheWidth must be null or > 0.',
@@ -62,10 +91,8 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
          'cacheHeight must be null or > 0.',
        );
 
-  /// Creates a provider that always requests a display-sized decode.
-  ///
-  /// At least one of [cacheWidth] and [cacheHeight] must be non-null. Same
-  /// durable identity as the unnamed constructor; Flutter [ImageCache]
+  /// Display-sized decode. At least one of [cacheWidth] / [cacheHeight] required.
+  /// Same durable identity as the unnamed constructor; Flutter [ImageCache]
   /// identity includes the decode size.
   const CachedNetworkBytesImageProvider.sized(
     this.url, {
@@ -76,6 +103,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
     this.allowUpscaling = false,
     this.resolver,
     this.errorListener,
+    this.loadSession,
   }) : assert(
          cacheWidth != null || cacheHeight != null,
          'CachedNetworkBytesImageProvider.sized requires cacheWidth and/or '
@@ -90,60 +118,49 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
          'cacheHeight must be null or > 0.',
        );
 
-  /// Absolute or [Uri.base]-relative image URL passed to [IImageBytesResolver].
+  /// Absolute or [Uri.base]-relative URL for [IImageBytesResolver].
   final String url;
 
-  /// Linear scale for decoded [ImageInfo].
-  ///
-  /// Participates in Flutter [ImageCache] identity with [cacheKey] and decode
-  /// size. Does not change the durable [ImageCacheKey] or coalesce key.
+  /// Linear scale for decoded [ImageInfo]. Part of Flutter [ImageCache]
+  /// identity; does not change the durable [ImageCacheKey].
   final double scale;
 
   /// HTTP headers for the network hop; folded into [cacheKey] via
   /// [ImageCacheKey.fromUrl].
   final Map<String, String>? headers;
 
-  /// Target decode width in pixels, or null for intrinsic / height-only sizing.
+  /// Target decode width in pixels, or null for intrinsic / height-only.
   ///
-  /// Participates in Flutter [ImageCache] identity. Does not change durable
-  /// [ImageCacheKey] or HTTP coalesce. Pass through [ui.TargetImageSize] using
-  /// [ResizeImagePolicy.exact] semantics (clamp when [allowUpscaling] is false).
+  /// Part of Flutter [ImageCache] identity, not durable [ImageCacheKey].
+  /// [ResizeImagePolicy.exact] semantics (clamp unless [allowUpscaling]).
   final int? cacheWidth;
 
-  /// Target decode height in pixels, or null for intrinsic / width-only sizing.
-  ///
-  /// Same identity and durable-key rules as [cacheWidth].
+  /// Target decode height in pixels, or null for intrinsic / width-only.
+  /// Same identity rules as [cacheWidth].
   final int? cacheHeight;
 
-  /// Whether [cacheWidth] / [cacheHeight] may exceed the intrinsic dimensions.
-  ///
-  /// Defaults to false (clamp to intrinsic). Participates in Flutter
-  /// [ImageCache] identity with the decode size; ignored when both dimensions
-  /// are null.
+  /// Whether decode dims may exceed intrinsic size. Default false.
+  /// Part of Flutter [ImageCache] identity when a decode size is set; ignored
+  /// when both dims are null.
   final bool allowUpscaling;
 
-  /// Ladder used to resolve bytes. Defaults to [ImageBytesResolver.shared].
-  ///
-  /// Omitted from [operator ==] / [hashCode] so injection does not split
-  /// Flutter [ImageCache] entries for the same Flutter identity.
+  /// Defaults to [ImageBytesResolver.shared]. Omitted from [operator ==].
   final IImageBytesResolver? resolver;
 
-  /// Called once when resolve, empty-body, or decode fails.
-  ///
-  /// Signature matches [ImageErrorListener]. Omitted from [operator ==] /
-  /// [hashCode] so a new closure on rebuild does not split Flutter
-  /// [ImageCache]. Useful under [DecorationImage] and other slots without
-  /// [Image.errorBuilder]; stream [onError] / [DecorationImage.onError] still
-  /// work on their own.
+  /// Soft resolve / empty-body / decode failure. Matches [ImageErrorListener].
+  /// Omitted from [operator ==]. Useful under [DecorationImage] without
+  /// [Image.errorBuilder].
   final ImageErrorListener? errorListener;
 
-  /// Default durable identity for [url] + [headers] ([ImageCacheKey.fromUrl]).
+  /// Receives [ImageBytesOrigin] after rich resolve. Omitted from
+  /// [operator ==]. Null: resolve/decode only, no paint provenance.
+  final CachedNetworkBytesLoadSession? loadSession;
+
+  /// Durable identity for [url] + [headers] ([ImageCacheKey.fromUrl]).
   ///
-  /// Flutter [ImageCache] equality uses this with [scale] and optional decode
-  /// size. This is not an [ImageBytesRequest.cacheKey] override: the provider
-  /// always resolves with a null request override, so headers stay in durable
-  /// and coalesce identity. To mint a custom key, call [IImageBytesResolver]
-  /// yourself or inject a resolver that does.
+  /// Not an [ImageBytesRequest.cacheKey] override: the provider always
+  /// resolves with a null request override. Custom keys require calling
+  /// [IImageBytesResolver] directly or injecting a resolver that does.
   ImageCacheKey get cacheKey => ImageCacheKey.fromUrl(url, headers: headers);
 
   bool get _hasDecodeSize => cacheWidth != null || cacheHeight != null;
@@ -162,8 +179,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
     CachedNetworkBytesImageProvider key,
     ImageDecoderCallback decode,
   ) {
-    // Ownership of this controller is handed off to [_loadAsync], which must
-    // close it on every completion path (success or failure).
+    // Handed to [_loadAsync], which must close on every completion path.
     final chunkEvents = StreamController<ImageChunkEvent>();
 
     final completer = MultiFrameImageStreamCompleter(
@@ -177,8 +193,8 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
       ],
     );
 
-    // Ephemeral: participates in reportError handling without keep-alive.
-    // Do not also invoke errorListener from _loadAsync's catch (double-fire).
+    // Ephemeral: reportError without keep-alive. Do not also call from
+    // _loadAsync's catch (double-fire).
     final listener = errorListener;
     if (listener != null) {
       completer.addEphemeralErrorListener(listener);
@@ -198,7 +214,12 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
         'The provided key must match the current instance of CachedNetworkBytesImageProvider.',
       );
 
-      final bytes = await key._resolver.resolve(
+      final sessionAndGeneration = switch (key.loadSession) {
+        final session? => (session, session._beginLoad()),
+        null => null,
+      };
+
+      final rich = await key._resolver.resolveRich(
         ImageBytesRequest(
           url: key.url,
           headers: key.headers,
@@ -213,6 +234,12 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
         ),
       );
 
+      if (sessionAndGeneration case (final session, final generation)) {
+        session._recordOrigin(generation, rich.origin);
+      }
+
+      final bytes = rich.bytes;
+
       if (bytes.isEmpty) {
         throw StateError(
           'CachedNetworkBytesImageProvider resolved empty bytes for ${key.url}',
@@ -222,8 +249,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
       final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
       if (!key._hasDecodeSize) {
         // Leave getTargetSize unset so external ResizeImage wrapping works.
-        // Await so decode failures enter catch (evict) instead of escaping the
-        // try as an unawaited Future.
+        // Await so decode failures enter catch (evict) instead of escaping.
         return await decode(buffer);
       }
 
@@ -231,7 +257,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
         buffer,
         getTargetSize: (intrinsicWidth, intrinsicHeight) {
           // ResizeImagePolicy.exact: host dims as targets, clamp unless
-          // allowUpscaling — same contract Image.network / ResizeImage use.
+          // allowUpscaling — same contract as Image.network / ResizeImage.
           var targetWidth = key.cacheWidth;
           var targetHeight = key.cacheHeight;
 
@@ -248,15 +274,14 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
         },
       );
     } catch (error) {
-      // Evict on the next microtask so the image cache can finish tracking
-      // this key before removal; a sync evict can miss a still-pending entry.
+      // Next microtask: sync evict can miss a still-pending ImageCache entry.
       scheduleMicrotask(() {
         PaintingBinding.instance.imageCache.evict(key);
       });
       rethrow;
     } finally {
-      // Fire-and-forget close: awaiting here can race the codec Future's
-      // error path and drop the original resolve/decode failure.
+      // Fire-and-forget: awaiting can race the codec Future and drop the
+      // original resolve/decode failure.
       chunkEvents.close().catchError((Object error, StackTrace stack) {
         FlutterError.reportError(
           FlutterErrorDetails(

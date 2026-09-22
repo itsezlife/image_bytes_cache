@@ -3,73 +3,58 @@ import 'package:image_bytes_cache/image_bytes_cache.dart';
 
 import 'image_fade_policy.dart';
 
-/// Builds progress chrome from a real download [ImageChunkEvent].
+/// Progress chrome from a real download [ImageChunkEvent].
 ///
-/// Only invoked when a non-null chunk event exists. Quiet store hits do not
-/// invent progress. Name avoids "Indicator" so hosts are not steered into
-/// Material progress widgets.
+/// Called only when a non-null chunk exists. Quiet store hits invent no
+/// progress. Named without "Indicator" so hosts are not steered into Material.
 typedef RasterProgressBuilder = Widget Function(BuildContext context, ImageChunkEvent progress);
 
 /// [Image.frameBuilder] / [Image.loadingBuilder] pair from [RasterPaintCompose].
 ///
 /// Closures share one compose session. Create once per image identity (e.g. in
-/// [State]) — rebuilding a new [RasterPaintBuilders] every [State.build] resets
+/// [State]). Rebuilding a new [RasterPaintBuilders] every [State.build] resets
 /// fade bookkeeping mid-flight.
 @immutable
 final class RasterPaintBuilders {
-  /// Wraps [frameBuilder] and optional [loadingBuilder] for one load.
   const RasterPaintBuilders({
     required this.frameBuilder,
     this.loadingBuilder,
   });
 
-  /// Placeholder / fade frame path. Always non-null when compose is used.
   final ImageFrameBuilder frameBuilder;
 
-  /// Progress path when a [RasterProgressBuilder] was supplied; otherwise null.
+  /// Non-null only when a [RasterProgressBuilder] was supplied.
   final ImageLoadingBuilder? loadingBuilder;
 }
 
-/// Shared helpers that wire placeholder, progress, and fade onto [Image] builders.
+/// Placeholder, progress, and fade on [Image] builders.
 ///
-/// Reusable with bare [Image] + any [ImageProvider], not only
-/// [CachedNetworkBytesImage]. Mechanism stays Widgets-level — no Material
-/// chrome. Keep-previous across identity changes stays [Image.gaplessPlayback];
-/// this compose does not invent a second previous-image system.
+/// Works with bare [Image] + any [ImageProvider], not only
+/// [CachedNetworkBytesImage]. Widgets-level only (no Material). Keep-previous
+/// across identity changes stays [Image.gaplessPlayback].
 ///
-/// ## Loading chrome
+/// While `frame == null`: [placeholderBuilder] or an empty box. When
+/// [progressBuilder] is set and chunks arrive, progress **replaces** the
+/// placeholder. Quiet resolves keep the placeholder.
 ///
-/// While waiting (`frame == null`): [placeholderBuilder], or an empty box.
-/// When [progressBuilder] is set and [ImageChunkEvent]s arrive, progress
-/// **replaces** the placeholder (no stacked loading chrome). Quiet resolves
-/// (no chunks) keep the placeholder.
+/// Fade-in is the image; fade-out is placeholder chrome. Either duration may
+/// be zero (default out is zero). [ImageFadePolicy.shouldSkip] jumps both
+/// alphas to final.
 ///
-/// ## Fade
-///
-/// Fade-in applies to the decoded image; fade-out applies to placeholder
-/// chrome. Either duration may be zero (default fade-out is zero).
-/// [ImageFadePolicy.shouldSkip] jumps both alphas to final without playing.
-///
-/// ## Origin
-///
-/// [originOf] supplies [ImageBytesOrigin] for [ImageFadeSkip.bytesCache].
-/// Returning `null` (or omitting [originOf]) never matches that bit — fail-safe
-/// so paint does not skip on an unknown store vs network fact. Without a
-/// non-null origin, only [ImageFadeSkip.imageCache] (sync Flutter decode) can
-/// skip under [ImageFadePolicy.standard].
+/// [originOf] feeds [ImageFadeSkip.bytesCache]. `null` / omitted never matches
+/// that bit; only [ImageFadeSkip.imageCache] can skip until origin is known.
 abstract final class RasterPaintCompose {
-  /// Default image fade-in when high-level chrome is enabled.
+  /// Default image fade-in when high-level chrome is on.
   static const Duration defaultFadeInDuration = Duration(milliseconds: 300);
 
-  /// Default placeholder fade-out (opt-in crossfade when hosts raise it).
+  /// Default placeholder fade-out (raise for crossfade).
   static const Duration defaultFadeOutDuration = Duration.zero;
 
-  /// Key on compose [FadeTransition]s so hosts/tests can distinguish package
-  /// motion from Material route fades.
+  /// Distinguishes package fade from Material route fades in tests.
   @visibleForTesting
   static const Key fadeTransitionKey = Key('image_bytes_cache.raster_fade');
 
-  /// Builds [Image] builder closures for one compose session.
+  /// Builder closures for one compose session.
   static RasterPaintBuilders builders({
     WidgetBuilder? placeholderBuilder,
     RasterProgressBuilder? progressBuilder,
@@ -167,7 +152,6 @@ final class _RasterPaintComposeSession {
   }
 }
 
-/// Crossfade: image fades in, optional placeholder fades out.
 final class _RasterFadeStack extends StatelessWidget {
   const _RasterFadeStack({
     required this.fadeInDuration,

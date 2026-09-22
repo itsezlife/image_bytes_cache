@@ -1,51 +1,41 @@
 import 'package:flutter/foundation.dart';
 import 'package:image_bytes_cache/image_bytes_cache.dart';
 
-/// Bitmask reasons to skip raster fade motion.
+/// Bitmask of reasons to skip raster fade.
 ///
-/// Two physical facts:
-/// - [imageCache] — Flutter already had a decoded frame
-///   (`ImageFrameBuilder`'s `wasSynchronouslyLoaded`)
-/// - [bytesCache] — resolve served a body without a network download
-///   ([ImageBytesOrigin.cache])
+/// [imageCache]: Flutter already had a decoded frame
+/// (`ImageFrameBuilder.wasSynchronouslyLoaded`).
+/// [bytesCache]: resolve served without a network download
+/// ([ImageBytesOrigin.cache]).
 ///
-/// Without a known [ImageBytesOrigin], [ImageFadePolicy.shouldSkip] does
-/// **not** treat [bytesCache] as matched (fail-safe). That keeps cold paint
-/// from silently skipping when origin is not wired yet.
+/// `null` origin never matches [bytesCache] (fail-safe when no load session).
 extension type const ImageFadeSkip._(int value) implements int {
-  /// No skip reasons.
   static const ImageFadeSkip none = ImageFadeSkip._(0);
 
-  /// Skip when Flutter reports a synchronous [ImageCache] hit.
+  /// Synchronous Flutter [ImageCache] hit.
   static const ImageFadeSkip imageCache = ImageFadeSkip._(1 << 0);
 
-  /// Skip when resolve origin is [ImageBytesOrigin.cache].
+  /// Resolve origin is [ImageBytesOrigin.cache].
   static const ImageFadeSkip bytesCache = ImageFadeSkip._(1 << 1);
 
-  /// Both skip reasons.
   static const ImageFadeSkip all = ImageFadeSkip._((1 << 0) | (1 << 1));
 
-  /// Union of this mask and [other].
   ImageFadeSkip operator |(ImageFadeSkip other) => ImageFadeSkip._(value | other.value);
 
-  /// Whether every bit in [other] is set on this mask.
   bool contains(ImageFadeSkip other) => (value & other.value) == other.value;
 }
 
-/// Fade skip policy over [ImageFadeSkip], plus always/never presets.
+/// When to skip fade, given [ImageFadeSkip] facts.
 ///
-/// - [standard] — skip [ImageFadeSkip.imageCache] and [ImageFadeSkip.bytesCache]
-/// - [always] — never skip; always play motion when durations are non-zero
-/// - [never] — always skip; jump both alphas to final without playing
-/// - custom — [ImageFadePolicy.new] with any [ImageFadeSkip] mask
+/// [standard] skips [ImageFadeSkip.imageCache] and [ImageFadeSkip.bytesCache].
+/// [always] never skips. [never] always skips (jump alphas to final).
+/// Custom: [ImageFadePolicy.new] with any mask.
 ///
-/// Skip evaluation is [shouldSkip]. Missing/`null` origin does not satisfy
-/// [ImageFadeSkip.bytesCache]. Zero [fadeInDuration] / [fadeOutDuration] on
-/// the compose path also plays no motion, independent of this policy.
+/// `null` origin does not satisfy [ImageFadeSkip.bytesCache]. Zero
+/// fade durations on compose also play no motion, independent of this policy.
 @immutable
 final class ImageFadePolicy {
-  /// Custom skip mask. Empty mask fades whenever durations allow (same as
-  /// [always] for skip purposes).
+  /// Custom skip mask. Empty mask never skips (same as [always] for skip).
   const ImageFadePolicy(this.skip) : _forceSkip = false;
 
   const ImageFadePolicy._({
@@ -53,34 +43,34 @@ final class ImageFadePolicy {
     required bool forceSkip,
   }) : _forceSkip = forceSkip;
 
-  /// Default chrome policy: skip warm Flutter decode and store-served bodies.
+  /// Skip warm Flutter decode and store-served bodies.
   static const ImageFadePolicy standard = ImageFadePolicy._(
     skip: ImageFadeSkip.all,
     forceSkip: false,
   );
 
-  /// Always play fade when durations are non-zero (ignore skip bits).
+  /// Play fade whenever durations are non-zero.
   static const ImageFadePolicy always = ImageFadePolicy._(
     skip: ImageFadeSkip.none,
     forceSkip: false,
   );
 
-  /// Never play fade; force final alphas immediately.
+  /// Force final alphas immediately.
   static const ImageFadePolicy never = ImageFadePolicy._(
     skip: ImageFadeSkip.none,
     forceSkip: true,
   );
 
-  /// Reasons that skip motion when their physical fact is present.
+  /// Skip bits that fire when their physical fact is present.
   final ImageFadeSkip skip;
 
   final bool _forceSkip;
 
-  /// Whether fade motion should be skipped for this load outcome.
+  /// Whether fade should be skipped for this load outcome.
   ///
-  /// [wasSynchronouslyLoaded] is Flutter's frame-builder flag.
-  /// [origin] is paint-facing resolve provenance; `null` means unknown —
-  /// [ImageFadeSkip.bytesCache] does not match until origin is known.
+  /// [wasSynchronouslyLoaded] is Flutter's frame-builder flag. [origin] is
+  /// resolve provenance; `null` means unknown, so [ImageFadeSkip.bytesCache]
+  /// does not match.
   bool shouldSkip({
     required bool wasSynchronouslyLoaded,
     ImageBytesOrigin? origin,
