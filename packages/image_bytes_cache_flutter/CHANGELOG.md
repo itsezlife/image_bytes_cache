@@ -1,5 +1,14 @@
 ## Unreleased
 
+- **ADDED**: Raster paint chrome on `CachedNetworkBytesImage` and shared
+  `RasterPaintCompose` helpers: `placeholderBuilder`, `progressBuilder`,
+  `ImageFadePolicy` / `ImageFadeSkip` (`imageCache` | `bytesCache`), and
+  `fadeInDuration` / `fadeOutDuration` (defaults 300ms in / zero out). Progress
+  replaces placeholder when real chunk events exist; quiet resolves invent no
+  progress. High-level knobs are mutually exclusive with raw `frameBuilder` /
+  `loadingBuilder`. `standard` declares both skip bits; missing origin does not
+  skip for `bytesCache`.
+
 ## 0.2.0
 
 - **CHANGED**: Paint adapters surface sealed `HttpBytesException` from core

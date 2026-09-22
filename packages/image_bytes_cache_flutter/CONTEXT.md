@@ -72,7 +72,9 @@ Shared helpers that wire [placeholderBuilder] / [progressBuilder] / fade onto
 chunk progress replaces the placeholder when [progressBuilder] is set;
 otherwise placeholder. Keep-previous across identity changes stays
 [Image.gaplessPlayback]. Origin for `bytesCache` skip is read from the load
-session, not from a custom [ImageInfo].
+session, not from a custom [ImageInfo]. Missing/`null` origin never matches
+`bytesCache` (fail-safe); [CachedNetworkBytesImage] does not yet pass origin,
+so only `imageCache` skip is live on that convenience path.
 _Avoid_: forcing a Stack overlay of placeholder+progress; inventing a raster
 sealed load FSM; relying on diagnostics events for fade gating
 
