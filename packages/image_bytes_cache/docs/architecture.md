@@ -91,6 +91,8 @@ Everything public is re-exported from `lib/image_bytes_cache.dart`:
 | Export | Role |
 | --- | --- |
 | `image_bytes_cache.dart` | Keys, retention, records, index/blob ports, `IImageBytesCache`, `IndexedImageBytesCache`, Memory/NoOp, `ImageBytesCache` facade |
+| `cache/cache_middleware.dart` | Cache middleware grammar: sealed ops/results (no reclaim), fold wrapper, rich read hit / HTTP cache meta |
+| `cache/middlewares/` | Opt-in Skip-cache + Cache Logger$Developer |
 | `image_bytes_resolver.dart` | `ImageBytesRequest`, `IImageBytesResolver`, `ImageBytesResolver` |
 | `http/http_bytes_client.dart` (+ `http/middlewares/`) | Network GET: middleware chain, typed `$` errors, pool, coalesce |
 | `image_bytes_diagnostics.dart` | Soft-failure policy and events |
@@ -120,5 +122,7 @@ in a host UI util tree and not in this core.
 | Index wire format | `image_bytes_index_document.dart` | [storage](storage.md) |
 | Resolve / write-through / empty miss | `ImageBytesResolver` | [resolve-ladder](resolve-ladder.md) |
 | Pool / coalesce / Timeout middleware / typed HTTP errors | `HttpBytesClient` + `http/` | [resolve-ladder](resolve-ladder.md) |
+| Cache middleware fold / rich hit unwrap / no reclaim op | `cache/cache_middleware.dart` | [resolve-ladder](resolve-ladder.md) |
+| Skip-cache / Cache Logger middleware | `cache/middlewares/` | [resolve-ladder](resolve-ladder.md) |
 | Open degrade / configure close | `ImageBytesCache` | [resolve-ladder](resolve-ladder.md) |
 | Commands, tests, seams | (tests / tooling) | [development](development.md) |

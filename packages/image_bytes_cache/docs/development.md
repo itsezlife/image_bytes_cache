@@ -50,12 +50,14 @@ on this path).
 | Seam | What to cover |
 | --- | --- |
 | `IImageBytesCache` / `IndexedImageBytesCache` | Hit/miss, soft LRU, TTL, capacity (entries + bytes), concurrent read vs exclusive mutate integrity, orphan healing, close; commit throw rolls RAM back (no optimistic hit) |
+| `MiddlewareImageBytesCache` | Forwards read/write/evict/prune/close through middleware over `MemoryImageBytesCache`; public read unwraps rich hits; no reclaim op; outermost-first fold |
+| Skip-cache / Cache Logger | Context/`shouldSkip` forces read miss + write no-op; logger observes hit/miss/evict/prune without altering bytes or reclaim |
 | `ImageBytesCache.open` (VM) | Real temp directory round-trip, batch commit after close/reopen, orphan reclaim, degraded open |
 | `ImageBytesCache.open` (web / Chrome) | Size routing, reopen, reclaim on Cache and OPFS |
 | `ImageBytesBlobStore$File$VM` | Worker death fails pending RPC (timeout-bounded); respawn after death; exclusive gate not stuck |
-| `ImageBytesResolver` | Hit skips network; empty cache misses; write-through failure (incl. index commit throw) still returns bytes; throwing `onEvent` is not unhandled |
-| `HttpBytesClient` | Coalesce, pool, non-2xx, empty body, timeout (+ abort when client honors), close, configure / resetShared |
-| `ImageCacheKey` | Canonical headers; distinct URLs with same basename |
+| `ImageBytesResolver` | Hit skips network; empty cache misses; write-through failure (incl. index commit throw) still returns bytes; throwing `onEvent` is not unhandled; `cacheKey` overrides durable + coalesce; override + Authorization debug diagnostic; `skipCache` end-to-end with Skip-cache middleware; freshness ladder (fresh / conditional 304 / 200 / 412); stale-on-`$Network`/`$Timeout`/exhausted `$Server` returns cached bytes + `resolve_stale_used`; no stale on `$Cancelled`/`$Authentication`/404/empty; typed `HttpBytesException` from send |
+| `HttpBytesClient` | Coalesce, pool, non-2xx, 304 success (empty/ignored body), empty body on non-304, timeout (+ abort when client honors), close, configure / resetShared; `identityOverride` coalesce |
+| `ImageCacheKey` | Canonical headers; conditional headers excluded; distinct URLs with same basename |
 
 Prefer fakes for `IImageBytesIndex` / `IImageBytesBlobStore` when testing the
 brain. Use real open for durability integration.
@@ -68,12 +70,18 @@ lib/
   src/
     image_bytes_cache.dart        # brain + facade + Memory/NoOp
     image_bytes_resolver.dart
+    cache/                        # cache middleware grammar + MiddlewareImageBytesCache
+      cache_middleware.dart
+      middlewares/
+        skip_cache_middleware.dart
+        logger_middleware.dart
     http/                         # client + request/response/exception/middleware grammar
       http_bytes_client.dart
       middlewares/
         timeout_middleware.dart
         retry_middleware.dart
         bearer_middleware.dart
+        conditional_middleware.dart
         logger_middleware.dart
       retry_backoff.dart
     image_bytes_diagnostics.dart

@@ -16,6 +16,8 @@ import 'package:meta/meta.dart';
 ///     const HttpBytesLoggerMiddleware$Developer(), // outermost
 ///     HttpBytesRetryMiddleware(),
 ///     const HttpBytesTimeoutMiddleware(),
+///     HttpBytesBearerMiddleware(getToken: getToken),
+///     const HttpBytesConditionalMiddleware(),
 ///   ],
 /// );
 /// ```

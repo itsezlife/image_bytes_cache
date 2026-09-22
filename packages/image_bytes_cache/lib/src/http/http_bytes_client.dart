@@ -69,6 +69,11 @@ extension type HttpBytesMiddlewareWrapper._(HttpBytesMiddleware _fn) {
 }
 
 /// Per-send middleware context: typed slots over a shared [Map].
+///
+/// Timeouts, retry flags, progress, conditional validators
+/// ([etag] / [lastModified] for [HttpBytesConditionalMiddleware]), and
+/// [identityOverride] (coalesce key from the resolver) live here. Seed slots
+/// before [HttpBytesClient.send].
 extension type HttpBytesContext(Map<String, Object?> _map) implements Map<String, Object?> {
   /// Empty context for a new send.
   factory HttpBytesContext.empty() => HttpBytesContext(<String, Object?>{});
@@ -88,7 +93,7 @@ extension type HttpBytesContext(Map<String, Object?> _map) implements Map<String
   /// Progress callback while the response body is read.
   static const onBytesProgressKey = 'on-bytes-progress';
 
-  /// Success predicate; default is 2xx.
+  /// Success predicate; default is 2xx or 304 Not Modified.
   static const validateStatusKey = 'validate-status';
 
   /// When `true`, [HttpBytesRetryMiddleware] skips retry for this send.
@@ -99,6 +104,18 @@ extension type HttpBytesContext(Map<String, Object?> _map) implements Map<String
 
   /// When `true`, allow retry even if the method is not idempotent.
   static const retryNonIdempotentKey = 'retry-non-idempotent';
+
+  /// Stored `ETag` validator for [HttpBytesConditionalMiddleware] (`If-None-Match`).
+  static const etagKey = 'etag';
+
+  /// Stored `Last-Modified` validator for [HttpBytesConditionalMiddleware]
+  /// (`If-Modified-Since`).
+  static const lastModifiedKey = 'last-modified';
+
+  /// Explicit coalesce identity ([ImageCacheKey]). When set, post-middleware
+  /// URL + headers are ignored for the in-flight key; headers still go on the
+  /// wire. [ImageBytesResolver] sets this from [ImageBytesRequest.cacheKey].
+  static const identityOverrideKey = 'identity-override';
 
   /// Shared flight [CancelToken] for this send (AbortableRequest abort + Timeout).
   ///
@@ -133,7 +150,7 @@ extension type HttpBytesContext(Map<String, Object?> _map) implements Map<String
   };
   set onBytesProgress(ImageBytesProgressCallback? value) => _set(onBytesProgressKey, value);
 
-  /// Success predicate; default is 2xx.
+  /// Success predicate; default is 2xx or 304 Not Modified.
   bool Function(int statusCode)? get validateStatus => switch (_map[validateStatusKey]) {
     final bool Function(int statusCode) predicate => predicate,
     _ => null,
@@ -154,6 +171,35 @@ extension type HttpBytesContext(Map<String, Object?> _map) implements Map<String
   /// When `true`, allow retry even if the method is not idempotent.
   bool get retryNonIdempotent => _map[retryNonIdempotentKey] == true;
   set retryNonIdempotent(bool value) => _set(retryNonIdempotentKey, value ? true : null);
+
+  /// Stored `ETag` for conditional GET. Non-empty → `If-None-Match` on the wire
+  /// when [HttpBytesConditionalMiddleware] is in the stack. Not part of coalesce
+  /// identity ([ImageCacheKey.canonicalHeaders] strips conditionals).
+  String? get etag => switch (_map[etagKey]) {
+    final String s when s.trim().isNotEmpty => s,
+    _ => null,
+  };
+  set etag(String? value) => _set(etagKey, value);
+
+  /// Stored `Last-Modified` for conditional GET. Non-empty → `If-Modified-Since`
+  /// on the wire when [HttpBytesConditionalMiddleware] is in the stack. Wire-only;
+  /// excluded from coalesce identity like [etag].
+  String? get lastModified => switch (_map[lastModifiedKey]) {
+    final String s when s.trim().isNotEmpty => s,
+    _ => null,
+  };
+  set lastModified(String? value) => _set(lastModifiedKey, value);
+
+  /// Explicit coalesce identity. When set, wins over post-middleware URL +
+  /// headers for the in-flight key. Durable ladder keys use the same value via
+  /// [ImageBytesRequest.cacheKey]. Representation headers still hit the wire.
+  /// Minting one override across different `Authorization` values is your
+  /// responsibility.
+  ImageCacheKey? get identityOverride => switch (_map[identityOverrideKey]) {
+    final ImageCacheKey k => k,
+    _ => null,
+  };
+  set identityOverride(ImageCacheKey? value) => _set(identityOverrideKey, value);
 
   void _set(String key, Object? value) {
     if (value == null) {
@@ -291,13 +337,22 @@ final class HttpBytesResponse {
 ///
 /// Concurrent callers that share the same **post-middleware** coalesce identity
 /// join one in-flight GET. Identity is `ImageCacheKey` from the request URL +
-/// headers after request-mutating middleware (e.g. Bearer) runs. Each caller may
+/// headers after request-mutating middleware (e.g. Bearer) runs, unless
+/// [HttpBytesContext.identityOverride] is set (resolver `cacheKey`). Then the
+/// override wins for coalesce. Conditional request headers (`If-None-Match` /
+/// `If-Modified-Since` / equivalents) are excluded from the URL+headers
+/// fingerprint so local validators do not fragment flights. Each caller may
 /// pass its own [CancelToken]:
 /// - canceling one subscriber completes only that caller with
 ///   [HttpBytesException$Cancelled] and leaves the flight running;
 /// - canceling the last subscriber cancels the shared flight token (socket
 ///   abort). Timeout middleware cancels that same flight token and still
 ///   surfaces [HttpBytesException$Timeout], not Cancelled.
+///
+/// Status handling: default success is 2xx **or** 304 Not Modified. A 304
+/// completes with headers and an empty body (illegal non-empty 304 bodies are
+/// ignored). Empty-body-as-[HttpBytesException$Internal] still applies when a
+/// successful body was expected (non-304).
 /// {@endtemplate}
 final class HttpBytesClient {
   /// {@macro http_bytes_client}
@@ -373,8 +428,10 @@ final class HttpBytesClient {
   /// Immutable list of middlewares to apply for each send.
   final List<HttpBytesMiddleware> middlewares;
 
-  /// Decides whether a response [statusCode] is a success. Defaults to 2xx.
-  /// Overridable per request via [HttpBytesContext.validateStatus].
+  /// Decides whether a response [statusCode] is a success.
+  ///
+  /// Defaults to 2xx **or** 304 Not Modified (revalidation success with no
+  /// body). Overridable per request via [HttpBytesContext.validateStatus].
   final bool Function(int statusCode)? validateStatus;
 
   /// Runs [request] through middlewares (delegates to [_sendUnstreamed]).
@@ -392,17 +449,22 @@ final class HttpBytesClient {
   );
 
   /// GETs [url] and returns the response body (delegates to [_sendUnstreamed]).
+  ///
+  /// Pass [context] to seed typed slots (e.g. [HttpBytesContext.identityOverride]
+  /// for coalesce, [HttpBytesContext.etag] for conditional middleware).
   Future<Uint8List> getBytes(
     Uri url, {
     Map<String, String>? headers,
     ImageBytesProgressCallback? onBytesProgress,
     CancelToken? cancelToken,
+    Map<String, Object?>? context,
   }) async {
     final response = await _sendUnstreamed(
       url: url,
       headers: headers,
       cancelToken: cancelToken,
       onBytesProgress: onBytesProgress,
+      context: context,
     );
     return response.toBytes();
   }
@@ -462,12 +524,21 @@ final class HttpBytesClient {
         // Joiner: flight already completed with a buffered body.
         if (response.body != null) return response;
 
-        final bytes = await response.toBytes();
+        final rawBytes = await response.toBytes();
         final flight = switch (ctx[_kInFlight]) {
           final _HttpBytesInFlight f => f,
           _ => null,
         };
-        if (bytes.isEmpty) {
+        // 304 Not Modified: success with no body. RFC forbids a message body;
+        // illegal non-empty payloads from misbehaving CDNs are ignored so they
+        // cannot replace caller expectations (ladder reuses cached bytes).
+        // Empty-body-as-Internal still applies when a successful body was
+        // expected (non-304).
+        final bytes = switch (response.statusCode) {
+          304 => Uint8List(0),
+          _ => rawBytes,
+        };
+        if (bytes.isEmpty && response.statusCode != 304) {
           final error = HttpBytesException$Internal(
             code: 'empty_body',
             message: 'Downloaded body is empty: $url',
@@ -480,6 +551,7 @@ final class HttpBytesClient {
         final buffered = response.clone(
           stream: http.ByteStream.fromBytes(bytes),
           body: bytes,
+          contentLength: response.statusCode == 304 ? 0 : null,
         );
         flight?.completeSuccess(buffered);
         return buffered;
@@ -509,10 +581,15 @@ final class HttpBytesClient {
     return (request, context) async {
       final callerToken = context.callerCancelToken ?? CancelToken();
 
-      final key = ImageCacheKey.fromUrl(
-        request.url.toString(),
-        headers: request.headers,
-      ).value;
+      // Explicit override (resolver cacheKey) wins for coalesce; otherwise
+      // fingerprint post-middleware URL + headers (Bearer Auth participates;
+      // conditionals are stripped inside ImageCacheKey.canonicalHeaders).
+      final key =
+          context.identityOverride?.value ??
+          ImageCacheKey.fromUrl(
+            request.url.toString(),
+            headers: request.headers,
+          ).value;
 
       final existing = _inFlight[key];
       if (existing != null) {
@@ -816,9 +893,13 @@ HttpBytesHandler _createClientSend(
         final contentLength = streamedResponse.contentLength ?? 0;
         var byteStream = streamedResponse.stream;
 
+        // 304: RFC forbids a body. Skip progress on any illegal payload; the
+        // buffer path will force an empty body before fan-out.
+        final isNotModified = statusCode == 304;
+
         // Report download progress as the body is consumed, if a callback was provided.
         // `total` is the Content-Length, or `null` when the server did not declare one.
-        if (context.onBytesProgress case final onBytesProgress?) {
+        if (context.onBytesProgress case final onBytesProgress? when !isNotModified) {
           final total = contentLength > 0 ? contentLength : null;
           var received = 0;
           byteStream = http.ByteStream(
@@ -835,7 +916,7 @@ HttpBytesHandler _createClientSend(
             HttpBytesResponse(
               statusCode: statusCode,
               headers: Map<String, String>.from(streamedResponse.headers),
-              contentLength: contentLength,
+              contentLength: isNotModified ? 0 : contentLength,
               request: request,
               stream: byteStream,
             ),
@@ -853,8 +934,12 @@ HttpBytesHandler _createClientSend(
   return httpHandler;
 }
 
-/// Default success predicate for image GETs: 2xx only.
-bool _defaultValidateStatus(int statusCode) => statusCode >= 200 && statusCode < 300;
+/// Default success predicate for image GETs: 2xx, or 304 Not Modified.
+///
+/// 304 is a first-class revalidation success (headers present; body optional
+/// and ignored). Without it, conditional GETs would surface as `$Request` and
+/// Retry would never see a clean success.
+bool _defaultValidateStatus(int statusCode) => (statusCode >= 200 && statusCode < 300) || statusCode == 304;
 
 /// Maps a non-success [statusCode] to a typed [HttpBytesException].
 ///

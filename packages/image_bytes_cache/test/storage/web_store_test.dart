@@ -31,6 +31,83 @@ void main() {
       expect(decoded['logo']!.byteLength, 12);
       expect(decoded['logo']!.writtenAt, written);
       expect(decoded['logo']!.accessedAt, accessed);
+      expect(decoded['logo']!.httpCacheMeta, isNull);
+    });
+
+    test('round-trips optional HTTP cache meta', () {
+      final written = DateTime.utc(2024, 1, 2, 3, 4, 5);
+      final accessed = DateTime.utc(2024, 1, 2, 3, 5, 0);
+      final date = DateTime.utc(2024, 1, 2, 3, 0);
+      final expires = DateTime.utc(2024, 1, 3);
+      final lastValidated = DateTime.utc(2024, 1, 2, 3, 6);
+      final meta = ImageHttpCacheMeta(
+        etag: '"abc"',
+        lastModified: 'Wed, 21 Oct 2015 07:28:00 GMT',
+        date: date,
+        expires: expires,
+        cacheControl: 'max-age=3600',
+        age: const Duration(seconds: 12),
+        lastValidatedAt: lastValidated,
+      );
+      final input = {
+        'logo': ImageBytesRecord(
+          key: const ImageCacheKey('logo'),
+          writtenAt: written,
+          accessedAt: accessed,
+          byteLength: 12,
+          httpCacheMeta: meta,
+        ),
+      };
+
+      final decoded = codec.decode(codec.encode(input));
+      final hit = decoded['logo']!;
+
+      expect(hit.httpCacheMeta?.etag, '"abc"');
+      expect(hit.httpCacheMeta?.lastModified, 'Wed, 21 Oct 2015 07:28:00 GMT');
+      expect(hit.httpCacheMeta?.date, date);
+      expect(hit.httpCacheMeta?.expires, expires);
+      expect(hit.httpCacheMeta?.cacheControl, 'max-age=3600');
+      expect(hit.httpCacheMeta?.age, const Duration(seconds: 12));
+      expect(hit.httpCacheMeta?.lastValidatedAt, lastValidated);
+    });
+
+    test('decodes pre-ETag entries without HTTP meta fields as null meta', () {
+      final wire = _jsonObjectBytes({
+        'v': 1,
+        'e': {
+          'logo': {
+            'w': DateTime.utc(2024, 1, 2).millisecondsSinceEpoch,
+            'a': DateTime.utc(2024, 1, 3).millisecondsSinceEpoch,
+            'n': 4,
+          },
+        },
+      });
+
+      final decoded = codec.decode(wire);
+
+      expect(decoded['logo']!.byteLength, 4);
+      expect(decoded['logo']!.httpCacheMeta, isNull);
+    });
+
+    test('decodes partial HTTP meta with missing keys as null fields', () {
+      final wire = _jsonObjectBytes({
+        'v': 1,
+        'e': {
+          'logo': {
+            'w': DateTime.utc(2024, 1, 2).millisecondsSinceEpoch,
+            'a': DateTime.utc(2024, 1, 3).millisecondsSinceEpoch,
+            'n': 4,
+            'h': {'et': '"only-etag"'},
+          },
+        },
+      });
+
+      final meta = codec.decode(wire)['logo']!.httpCacheMeta;
+
+      expect(meta?.etag, '"only-etag"');
+      expect(meta?.lastModified, isNull);
+      expect(meta?.cacheControl, isNull);
+      expect(meta?.age, isNull);
     });
 
     test('rejects unsupported version', () {

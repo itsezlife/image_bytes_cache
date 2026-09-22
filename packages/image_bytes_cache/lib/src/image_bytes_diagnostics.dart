@@ -4,10 +4,6 @@ import 'package:meta/meta.dart';
 
 /// Soft-failure reporting for the image-bytes ladder.
 ///
-/// Does not change resolve or wipe behavior. It only controls whether anyone
-/// hears about write-through failures, index recovery, and degraded open.
-/// Default is [ImageBytesDiagnostics.silent].
-///
 /// Process-wide policy lives on [current], set by [ImageBytesCache.open] /
 /// [ImageBytesCache.configure].
 ///
@@ -54,6 +50,7 @@ sealed class ImageBytesDiagnostics {
             level: switch (event.level) {
               ImageBytesLogLevel.error => 1000,
               ImageBytesLogLevel.warning => 900,
+              ImageBytesLogLevel.debug => 500,
             },
           );
         case ImageBytesDiagnosticsOnEvent(:final onEvent):
@@ -88,7 +85,10 @@ final class ImageBytesDiagnosticsOnEvent extends ImageBytesDiagnostics {
 
 /// Severity for [ImageBytesLogEvent].
 enum ImageBytesLogLevel {
-  /// Recoverable / expected recovery.
+  /// Development notice (for example cacheKey set with Authorization headers).
+  debug,
+
+  /// Recoverable path that still completed (for example stale-on-network-error).
   warning,
 
   /// Unexpected durable failure after a successful network fetch.
@@ -105,6 +105,16 @@ extension type const ImageBytesLogOp(String value) implements String {
 
   /// Durable open failed; host received Memory / NoOp instead of throwing.
   static const openDegraded = ImageBytesLogOp('open_degraded');
+
+  /// [ImageBytesRequest.cacheKey] set while request headers include
+  /// `Authorization`. Override wins for durable and coalesce identity; mint
+  /// distinct keys per tenant if you need both.
+  static const cacheKeyAuthorization = ImageBytesLogOp('cache_key_authorization');
+
+  /// Cached bytes returned after `$Network`, `$Timeout`, or `$Server` failed
+  /// the GET. Resolve succeeds; the failure shows up here only when diagnostics
+  /// are audible.
+  static const resolveStaleUsed = ImageBytesLogOp('resolve_stale_used');
 }
 
 /// One soft-failure report from the image-bytes ladder.

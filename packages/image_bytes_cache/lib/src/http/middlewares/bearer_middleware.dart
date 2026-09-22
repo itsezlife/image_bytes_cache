@@ -4,7 +4,7 @@ import 'package:meta/meta.dart';
 /// {@template http_bytes_bearer}
 /// Attaches `Authorization: Bearer <token>` to every request.
 ///
-/// Named after the Bearer scheme — not HTTP Basic. Performs **no** logout and
+/// Named after the Bearer scheme, not HTTP Basic. Performs **no** logout and
 /// **no** token refresh: hosts that need session teardown or refresh belong in
 /// the product auth stack.
 ///

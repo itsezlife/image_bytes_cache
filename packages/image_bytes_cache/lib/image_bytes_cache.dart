@@ -17,8 +17,12 @@ library;
 
 export 'package:cancel_token/cancel_token.dart' show CancelToken, CancelledException;
 
+export 'src/cache/cache_middleware.dart';
+export 'src/cache/middlewares/logger_middleware.dart';
+export 'src/cache/middlewares/skip_cache_middleware.dart';
 export 'src/http/http_bytes_client.dart';
 export 'src/http/middlewares/bearer_middleware.dart';
+export 'src/http/middlewares/conditional_middleware.dart';
 export 'src/http/middlewares/logger_middleware.dart';
 export 'src/http/middlewares/retry_middleware.dart';
 export 'src/http/middlewares/timeout_middleware.dart';
@@ -26,3 +30,4 @@ export 'src/http/retry_backoff.dart';
 export 'src/image_bytes_cache.dart';
 export 'src/image_bytes_diagnostics.dart';
 export 'src/image_bytes_resolver.dart';
+export 'src/image_http_cache_freshness.dart';

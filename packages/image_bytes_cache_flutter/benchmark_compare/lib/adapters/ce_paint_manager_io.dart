@@ -5,8 +5,7 @@ import 'dart:io' as io;
 
 // Prefer the IO implementation so analyzer + VM share the Hive file-store API.
 // ignore: implementation_imports
-import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart'
-    as ce_io;
+import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart' as ce_io;
 import 'package:http/http.dart' as http;
 
 final class CeManagerOpen {

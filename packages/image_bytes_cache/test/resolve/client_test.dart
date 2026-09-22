@@ -113,6 +113,61 @@ void main() {
       );
     });
 
+    test('treats 304 Not Modified as success without requiring a body', () async {
+      final client = HttpBytesClient(
+        client: MockClient(
+          (_) async => http.Response.bytes(
+            Uint8List(0),
+            304,
+            headers: {'etag': '"v1"', 'cache-control': 'max-age=60'},
+          ),
+        ),
+        middlewares: const [],
+      );
+      addTearDown(client.close);
+
+      final response = await client.send(
+        HttpBytesRequest(http.Request('GET', Uri.parse('https://cdn.example.com/a.svg'))),
+      );
+
+      expect(response.statusCode, 304);
+      expect(response.headers['etag'], '"v1"');
+      expect(await response.toBytes(), isEmpty);
+      expect(
+        await client.getBytes(Uri.parse('https://cdn.example.com/a.svg')),
+        isEmpty,
+      );
+    });
+
+    test('ignores a non-empty illegal 304 body', () async {
+      final client = HttpBytesClient(
+        client: MockClient(
+          (_) async => http.Response.bytes(
+            Uint8List.fromList([1, 2, 3]),
+            304,
+            headers: {'etag': '"v2"'},
+          ),
+        ),
+        middlewares: const [],
+      );
+      addTearDown(client.close);
+
+      final reports = <(int, int?)>[];
+      final response = await client.send(
+        HttpBytesRequest(http.Request('GET', Uri.parse('https://cdn.example.com/a.svg'))),
+        onBytesProgress: (cumulative, total) => reports.add((cumulative, total)),
+      );
+
+      expect(response.statusCode, 304);
+      expect(response.contentLength, 0);
+      expect(await response.toBytes(), isEmpty);
+      expect(reports, isEmpty);
+      expect(
+        await client.getBytes(Uri.parse('https://cdn.example.com/a.svg')),
+        isEmpty,
+      );
+    });
+
     test(r'throws HttpBytesException$Network when the client fails without a response', () async {
       final client = HttpBytesClient(
         client: MockClient(
@@ -319,6 +374,67 @@ void main() {
       ).wait;
 
       expect(hits, 2);
+    });
+
+    test('identityOverride coalesces despite different Authorization headers', () async {
+      var hits = 0;
+      final release = Completer<void>();
+      final client = HttpBytesClient(
+        client: MockClient((_) async {
+          hits++;
+          await release.future;
+          return http.Response.bytes(Uint8List.fromList([3]), 200);
+        }),
+      );
+      addTearDown(client.close);
+
+      final url = Uri.parse('https://cdn.example.com/override.svg');
+      const override = ImageCacheKey('host_identity');
+      final a = client.getBytes(
+        url,
+        headers: const {'Authorization': 'Bearer a'},
+        context: HttpBytesContext.empty()..identityOverride = override,
+      );
+      final b = client.getBytes(
+        url,
+        headers: const {'Authorization': 'Bearer b'},
+        context: HttpBytesContext.empty()..identityOverride = override,
+      );
+      release.complete();
+
+      final results = await (a, b).wait;
+      expect(results.$1, Uint8List.fromList([3]));
+      expect(results.$2, Uint8List.fromList([3]));
+      expect(hits, 1);
+    });
+
+    test('coalesces when only conditional headers differ', () async {
+      var hits = 0;
+      final release = Completer<void>();
+      final client = HttpBytesClient(
+        client: MockClient((_) async {
+          hits++;
+          await release.future;
+          return http.Response.bytes(Uint8List.fromList([7]), 200);
+        }),
+      );
+      addTearDown(client.close);
+
+      final url = Uri.parse('https://cdn.example.com/revalidate.svg');
+      final a = client.getBytes(
+        url,
+        headers: const {'If-None-Match': '"v1"'},
+      );
+      final b = client.getBytes(
+        url,
+        headers: const {'If-Modified-Since': 'Wed, 21 Oct 2015 07:28:00 GMT'},
+      );
+      release.complete();
+
+      final results = await (a, b).wait;
+      expect(results.$1, Uint8List.fromList([7]));
+      expect(results.$2, Uint8List.fromList([7]));
+      expect(hits, 1);
     });
 
     test('does not coalesce URL-with-|… into clean URL plus those headers', () async {

@@ -18,8 +18,7 @@ import 'dart:ui' show Offset;
 import 'package:flutter/foundation.dart' show immutable;
 import 'package:image_bytes_cache_benchmark_compare/profile_report_key.dart';
 
-export 'package:image_bytes_cache_benchmark_compare/profile_report_key.dart'
-    show ProfileReportKey;
+export 'package:image_bytes_cache_benchmark_compare/profile_report_key.dart' show ProfileReportKey;
 
 /// Feed length tier for one matrix cell.
 enum FeedListSize {
@@ -99,8 +98,7 @@ enum FeedComplexity {
 
   /// Many distinct keys, first-pass misses, mixed under/over 64 KiB,
   /// in-view coalesce bursts.
-  complicated
-  ;
+  complicated,
 }
 
 /// Density feed content control (`FEED` dart-define).
@@ -168,8 +166,7 @@ final class ProfileMatrixCell {
   final bool warmSettle;
 
   /// TimelineSummary report key for [adapter] under this cell.
-  String reportKeyFor(String adapter) =>
-      ProfileReportKey.encode(adapter: adapter, cellId: id);
+  String reportKeyFor(String adapter) => ProfileReportKey.encode(adapter: adapter, cellId: id);
 
   /// Host-feel / hit path: medium list, medium fling, ordinary warm settle.
   static const ProfileMatrixCell warmScroll = ProfileMatrixCell(
@@ -228,8 +225,7 @@ final class ProfileMatrixCell {
   }
 
   @override
-  bool operator ==(Object other) =>
-      other is ProfileMatrixCell && other.id == id;
+  bool operator ==(Object other) => other is ProfileMatrixCell && other.id == id;
 
   @override
   int get hashCode => id.hashCode;

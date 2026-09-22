@@ -12,16 +12,22 @@ Filename-safe string: host + safe basename + short fingerprint of the
 host/basename extraction and hashing, so a relative path and its absolute form
 against the same base share one key — the same URI form
 `ImageBytesResolver` uses for GET. Header keys are lowercased, last-wins on
-case duplicates, then sorted before hashing (`canonicalHeaders`). Fingerprint
+case duplicates, then sorted before hashing (`canonicalHeaders`). Conditional
+request headers (`If-None-Match`, `If-Modified-Since`, `If-Match`,
+`If-Unmodified-Since`, `If-Range`) are **excluded** from that material so local
+validators stay wire-only and do not fragment coalesce or durable keys;
+`Authorization` and other representation headers still participate. Fingerprint
 bytes are length-prefixed URL + canonical headers (not a `url|headers` string
 join), so a `|` inside the URL or a header value cannot forge another
 `(url, headers)` pair.
 
 `HttpBytesClient` in-flight coalesce uses `ImageCacheKey.fromUrl(…).value`
-**after** request-mutating middleware runs, so Bearer-injected `Authorization`
+after request-mutating middleware runs, so Bearer-injected `Authorization`
 participates in the coalesce key (different tokens do not share a flight).
-Durable resolve identity remains the request’s `ImageCacheKey` / `cacheKey`
-(caller headers); hosts that vary auth across users should put those headers on
+Unless `HttpBytesContext.identityOverride` is set (resolver `cacheKey`), in
+which case the override wins for coalesce and durable identity together.
+Without an override, durable identity still follows request headers /
+`cacheKey`. Hosts that vary auth across users should put those headers on
 `ImageBytesRequest` or mint distinct `cacheKey`s. Header casing / map order
 still cannot split one logical download, and delimiter collisions cannot merge
 two.
@@ -32,48 +38,105 @@ names and web store keys.
 
 Do not use basename-only disk keys. Do not treat header key casing as identity.
 Do not join URL and headers with an ambiguous delimiter for coalesce or
-fingerprinting.
+fingerprinting. Do not fold conditional request headers into identity.
 
 ## Request and resolve
 
 `ImageBytesRequest` carries `url`, optional `headers`, optional `cacheKey`,
-and optional `onBytesProgress`. When `cacheKey` is null, the resolver builds
-one with `ImageCacheKey.fromUrl` (canonical URL + headers). When `cacheKey` is
-set, that value is the **full** durable identity: headers still go on the
-network GET but are not folded into the key. Hosts that vary `Authorization`
-across logical resources must omit `cacheKey` or mint distinct overrides — the
-ladder will not silently share one override across different Authorization
-values.
+optional `skipCache`, and optional `onBytesProgress`.
+
+When `cacheKey` is null, the resolver builds one with `ImageCacheKey.fromUrl`
+(canonical URL + headers). When set, that value is the full durable and HTTP
+coalesce identity. Headers still go on the GET but are not folded into the key
+(copied to `HttpBytesContext.identityOverride`). If you vary `Authorization`
+across users, omit `cacheKey` or mint distinct overrides. Sharing one override
+across tenants shares one slot. When override is set and request headers include
+`Authorization`, audible diagnostics emit `cache_key_authorization` at debug
+level (Bearer-injected tokens are not checked at resolve time).
+
+`skipCache: true` sets `CacheContext.skipCache` on durable read/write. That only
+takes effect on a `MiddlewareImageBytesCache` whose chain includes
+`SkipCacheMiddleware` (or host middleware that reads the flag). Plain stores
+ignore it. Skip forces a miss and write no-op; HTTP still runs.
 
 `onBytesProgress` is an optional sink (`cumulative`, optional `total`) for
 honest HTTP body progress. The ladder forwards it to `HttpBytesClient` on a
-**network miss** only. A durable non-empty cache hit returns bytes without
-invoking the sink — do not invent mid-download percents from silence. Resolve
-remains a single `Future<Uint8List>` of the full body; there is no public
-streaming resolve API. The sink does not participate in `ImageCacheKey`
-identity or in-flight coalesce.
+network miss only. A durable non-empty cache hit returns bytes without invoking
+the sink. Do not invent mid-download percents from silence. Resolve remains a
+single `Future<Uint8List>` of the full body; there is no public streaming
+resolve API. The sink does not participate in identity or coalesce.
 
 `ImageBytesResolver` order:
 
-1. `cache.read(key)`. Non-empty hit returns immediately (no progress events).
-2. Empty cached payload counts as a **miss** (bad empty write must not poison
-   the ladder). Durable stores also refuse to retain empty writes (evict the
-   key instead) and scrub sticky empty rows on read so they cannot waste
-   `maxEntries` capacity.
-3. `HttpBytesClient.getBytes` on `Uri.base.resolve(url)` on miss, forwarding
-   `onBytesProgress` when present.
-4. Return network bytes; schedule `cache.write` with `unawaited`. Write failure
-   reports through `ImageBytesDiagnostics` and does **not** fail `resolve`.
-   A throwing host `onEvent` callback is swallowed inside `report` so the
-   unawaited catch path cannot become a second unhandled async error.
+1. Rich cache read (via `execute` with skip context when `skipCache` is set on a
+   middleware store; otherwise `readRich` / public `read`). Empty bytes count as
+   a miss.
+2. Fresh hit returns bytes immediately. No network, no progress events.
+   Freshness is `ImageHttpCacheFreshness`, separate from `ImageBytesRetention`
+   eviction.
+3. Stale hit with validators (`etag` / `lastModified`) issues a conditional GET.
+   Seeds `HttpBytesContext.etag` / `lastModified` for
+   `HttpBytesConditionalMiddleware`. Without that middleware on the client,
+   validators never reach the wire and the GET stays unconditional.
+4. Stale without validators, or miss: unconditional GET on
+   `Uri.base.resolve(url)` via `HttpBytesClient.send` (`HttpBytesRequest`),
+   with identity override from `cacheKey` and `onBytesProgress` when present.
+5. 304 returns cached bytes and soft-refreshes meta (`lastValidatedAt` plus any
+   freshness headers on the 304). Bytes are not replaced.
+6. 200 returns new bytes and soft write-through of bytes plus response-derived
+   HTTP meta.
+7. 412 after a conditional GET: one unconditional GET, then same as 200 or fail.
+8. `$Network` / `$Timeout` / `$Server` after a non-empty cache hit: return those
+   bytes and emit `resolve_stale_used` when diagnostics are audible. Cancel,
+   auth failures, 404-class `$Request`, and empty or missing cache still throw.
+9. Other typed `HttpBytesException` failures propagate. Write-through failures
+   report through `ImageBytesDiagnostics` and do not fail `resolve`. A throwing
+   host `onEvent` is swallowed inside `report`.
+
+Default freshness when `Cache-Control` / `Expires` are absent: validators
+revalidate on every use; no validators retain until retention would drop the
+row. When those headers are present, honor `max-age` / `Expires` (with `Age` /
+`Date` when known); `no-cache` / `must-revalidate` always revalidate;
+`immutable` stays fresh until retention. No public ETag flags on `open` /
+`configure`. There is no host `allowStale` switch either; stale-on-network-error
+is the engine default.
 
 Inject cache and client in tests. Production paint usually uses
-`ImageBytesResolver.shared()`, which **re-reads** `ImageBytesCache.shared()`
-and `HttpBytesClient.shared()` (or `debugShared` overrides) on every
-`resolve`. It does not snapshot them at first call, so configure after an
-early paint still enables durable caching, and configure replacement /
-`resetShared` cannot leave the ladder bound to NoOp or a closed previous
-store.
+`ImageBytesResolver.shared()`, which re-reads `ImageBytesCache.shared()` and
+`HttpBytesClient.shared()` (or `debugShared` overrides) on every `resolve`. It
+does not snapshot them at first call, so configure after an early paint still
+enables durable caching, and configure replacement / `resetShared` cannot leave
+the ladder bound to NoOp or a closed previous store.
+
+Hosts that want conditional headers on the wire should include
+`HttpBytesConditionalMiddleware` on the process client. Recommended order
+(outermost first): Logger, Retry, Timeout, Bearer, Conditional.
+
+## Cache middleware
+
+`MiddlewareImageBytesCache` implements `IImageBytesCache` and runs every call
+through a `CacheMiddleware` chain into an inner store. Sealed `CacheOperation` /
+`CacheOperationResult` cover read, write, evict, prune, and close. There is no
+reclaim op. Orphan reclaim stays on `IndexedImageBytesCache` under its exclusive
+gate.
+
+A chain read yields `CacheReadHit`: bytes, optional retention timestamps, and
+optional `ImageHttpCacheMeta`. Public `read` unwraps to `Uint8List?`. Call
+`execute` for the full hit or a shared `CacheContext`. Stores that implement
+`IImageBytesRichCache` fill timestamps and HTTP meta on the terminal read;
+`write` accepts optional `httpCacheMeta` the same way.
+
+Opt-in product middlewares (list outermost first):
+
+| Middleware | Role |
+| --- | --- |
+| [CacheLoggerMiddleware$Developer] | Observes hit/miss/evict/prune via `developer.log` (`image_bytes_cache`); no durable IO; place outermost |
+| [SkipCacheMiddleware] | When `CacheContext.skipCache` (or `shouldSkip`) is true: read returns miss, write is a no-op; evict/prune/close still forward |
+
+Seed `CacheContext.skipCache` through `execute`.
+`ImageBytesRequest.skipCache` does this via the resolver. Public `read` /
+`write` on the wrapper use an empty context, so they only skip when
+`shouldSkip` decides without the flag.
 
 ## HTTP: `HttpBytesClient`
 
@@ -82,27 +145,32 @@ GET bodies only. Callers own disk cache and decode.
 | Knob | Default | Notes |
 | --- | --- | --- |
 | `maxConcurrent` | 6 | Further callers wait in `Pool` |
-| `middlewares` | Timeout only (~15s connect + receive) | `null` → default [HttpBytesTimeoutMiddleware]; `[]` → no Timeout. Connect bounds headers; receive bounds idle body gaps. Opt-in: [HttpBytesRetryMiddleware], [HttpBytesBearerMiddleware], [HttpBytesLoggerMiddleware$Developer] (outermost) |
+| `middlewares` | Timeout only (~15s connect + receive) | `null` → default [HttpBytesTimeoutMiddleware]; `[]` → no Timeout. Connect bounds headers; receive bounds idle body gaps. Opt-in: [HttpBytesRetryMiddleware], [HttpBytesBearerMiddleware], [HttpBytesConditionalMiddleware], [HttpBytesLoggerMiddleware$Developer] (outermost) |
 
 Middleware list order is outermost first (first entry wraps the rest). Coalesce
-runs **inside** the middleware chain (after request-mutating middleware, before
-`Client.send`), so identity is `ImageCacheKey` from the **post-middleware** URL +
-headers (Bearer-injected `Authorization` participates). Concurrent calls that
-share that identity share one in-flight GET; each caller still gets its own
-`Future` (so per-caller cancel can fail one joiner without aborting the flight).
-Joiners do not hold a pool slot. The starter returns a streaming response so
-Timeout can wrap receive-idle on the body; `_sendUnstreamed` buffers afterward
-and fans the buffer out to joiners.
+runs inside the middleware chain (after request-mutating middleware, before
+`Client.send`). Identity is `ImageCacheKey` from the post-middleware URL +
+headers (Bearer-injected `Authorization` participates; conditional request
+headers do not), unless `HttpBytesContext.identityOverride` is set. Then that
+key wins. Concurrent calls that share that identity share one in-flight GET;
+each caller still gets its own `Future` (so per-caller cancel can fail one
+joiner without aborting the flight). Joiners do not hold a pool slot. The
+starter returns a streaming response so Timeout can wrap receive-idle on the
+body; `_sendUnstreamed` buffers afterward and fans the buffer out to joiners.
 
 `send` / `getBytes` seed caller context and run the pipeline (user middlewares
-wrap coalesce + `Client.send`). `_createClientSend` is Client.send-only: status,
+wrap coalesce + `Client.send`). `getBytes` accepts an optional `context` map
+(same slots as `send`). `_createClientSend` is Client.send-only: status,
 progress `ByteStream.map`. Failures surface only as the sealed
 `HttpBytesException` variants (`$Network`, `$Request`, `$Server`,
 `$Authentication`, `$Timeout`, `$Cancelled`, `$Internal`), each with `code` /
-`statusCode` / `message` / optional `error` / `data`. Non-2xx maps by status:
-401/403 → `$Authentication`, 5xx → `$Server`, else `$Request`. `getBytes`
-remains a convenience over `send(HttpBytesRequest)` (body via `toBytes` /
-cached `body`).
+`statusCode` / `message` / optional `error` / `data`. Default success is 2xx
+or 304 Not Modified (headers present; body optional and ignored; illegal
+non-empty 304 bodies are discarded). Empty-body-as-`$Internal` still applies
+when a successful body was expected (non-304). Other non-success statuses map
+by code: 401/403 → `$Authentication`, 5xx → `$Server`, else `$Request`.
+`getBytes` remains a convenience over `send(HttpBytesRequest)` (body via
+`toBytes` / cached `body`).
 
 Each `send` creates a **flight** [CancelToken] on `HttpBytesContext.cancelToken`
 and uses it as the Abortable GET `abortTrigger`. Callers may pass their own
@@ -118,9 +186,16 @@ first). Ad-hoc hooks use `HttpBytesMiddlewareWrapper(onRequest: …)`.
 
 `HttpBytesRetryMiddleware` (opt-in) retries idempotent GETs on transient failures
 (`$Network` / 408 / 425 / 429 / selected 5xx), honors delta-seconds `Retry-After`,
-and never retries `$Timeout` / `$Cancelled` / `$Authentication`. Place it
+and never retries `$Timeout` / `$Cancelled` / `$Authentication`. 304 Not Modified
+is a client success (no exception), so Retry does not retry it. Place it
 **outside** Timeout. `HttpBytesBearerMiddleware` only sets
 `Authorization: Bearer …` from `getToken` — no logout / refresh.
+`HttpBytesConditionalMiddleware` (opt-in) reads `HttpBytesContext.etag` /
+`lastModified` and sets `If-None-Match` / `If-Modified-Since` when non-empty;
+missing validators leave the GET unconditional. Place it **after** Bearer and
+**before** coalesce (innermost request-mutating layer). Conditionals stay
+wire-only (identity exclusion above). Recommended host / revalidation stack
+(outermost first): Logger → Retry → Timeout → Bearer → Conditional.
 `HttpBytesLoggerMiddleware$Developer` (opt-in) logs method/URL/outcome/latency
 via `developer.log` (`http_bytes`); place outermost to include retry time.
 
@@ -155,6 +230,8 @@ Ops on `ImageBytesLogEvent`:
 | `write_through` | Durable write failed after a successful network fetch |
 | `index_wipe` | Corrupt / unrecognized index recovered by wipe |
 | `open_degraded` | Hard open failed; host received Memory store instead of throw |
+| `cache_key_authorization` | `cacheKey` set with an `Authorization` request header (debug) |
+| `resolve_stale_used` | Resolve completed with cached bytes after `$Network` / `$Timeout` / `$Server` (warning) |
 
 The package does not depend on a product logger. Hosts bridge
 `onEvent` at bootstrap if they want ambient logging.

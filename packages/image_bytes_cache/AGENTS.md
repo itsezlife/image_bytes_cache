@@ -33,12 +33,15 @@ More: [`docs/development.md`](docs/development.md).
 
 | Path | What | Doc |
 | --- | --- | --- |
-| `image_bytes_cache.dart` | `ImageCacheKey`, retention, ports, `IndexedImageBytesCache`, Memory/NoOp, `ImageBytesCache` open/configure | [architecture](docs/architecture.md), [storage](docs/storage.md) |
-| `image_bytes_resolver.dart` | Ladder: cache → fetch → write-through | [resolve-ladder](docs/resolve-ladder.md) |
+| `image_bytes_cache.dart` | `ImageCacheKey`, retention, ports, `IndexedImageBytesCache`, Memory/NoOp, `ImageHttpCacheMeta` / rich hit, `ImageBytesCache` open/configure | [architecture](docs/architecture.md), [storage](docs/storage.md) |
+| `cache/cache_middleware.dart` | Sealed `CacheOperation` / result, `CacheMiddleware` fold, `MiddlewareImageBytesCache`, rich `CacheReadHit` | [resolve-ladder](docs/resolve-ladder.md) |
+| `cache/middlewares/` | Opt-in Skip-cache + Cache `Logger$Developer` | [resolve-ladder](docs/resolve-ladder.md) |
+| `image_bytes_resolver.dart` | Ladder: freshness → conditional/unconditional GET → write-through | [resolve-ladder](docs/resolve-ladder.md) |
+| `image_http_cache_freshness.dart` | Freshness policy + response-meta helpers | [resolve-ladder](docs/resolve-ladder.md) |
 | `http/http_bytes_client.dart` | HTTP GET types, middleware chain, client | [resolve-ladder](docs/resolve-ladder.md) |
-| `http/middlewares/` | HTTP middlewares (`Timeout`, opt-in `Retry`, `Bearer`, `Logger$Developer`) | [resolve-ladder](docs/resolve-ladder.md) |
+| `http/middlewares/` | HTTP middlewares (`Timeout`, opt-in `Retry`, `Bearer`, `Conditional`, `Logger$Developer`) | [resolve-ladder](docs/resolve-ladder.md) |
 | `image_bytes_diagnostics.dart` | Soft-failure policy (`silent` / `developer` / `onEvent`) | [resolve-ladder](docs/resolve-ladder.md) |
-| `image_bytes_index_document.dart` | Versioned index JSON codec (`v:1`) | [storage](docs/storage.md) |
+| `image_bytes_index_document.dart` | Versioned index JSON codec (`v:1`, additive HTTP `h` meta) | [storage](docs/storage.md) |
 | `image_bytes_web_keys.dart` | Synthetic `.invalid` Cache URLs + OPFS dir names | [storage](docs/storage.md) |
 | `isolate_controller.dart` | Long-lived isolate spawn/add/stream/close (VM blob IO) | [storage](docs/storage.md) |
 | `environment_specific/cache_open*.dart` | Conditional `open` (VM files / web Cache+OPFS) | [storage](docs/storage.md) |
@@ -90,7 +93,10 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
 - **Empty cached payload = miss** in the resolver; empty durable writes are
   not retained (evict); sticky empty rows scrub on read; write-through failure
   never fails a successful network resolve (diagnostics only; throwing
-  `onEvent` is swallowed).
+  `onEvent` is swallowed). Stale-on-network-error returns non-empty cached
+  bytes on `$Network` / `$Timeout` / exhausted `$Server` only — never on
+  `$Cancelled` / `$Authentication` / definitive `$Request` or empty/missing
+  cache.
 - **Open:** hard storage failure degrades to `MemoryImageBytesCache` unless
   `throwOnOpenFailure`; partial VM worker / web handles are closed before
   degrade or rethrow. Missing VM `directory` still throws. `configure`
@@ -104,12 +110,19 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
 ## Gotchas quick-reference
 
 - Header key casing and map order must not change identity or coalesce keys
-  (`ImageCacheKey.canonicalHeaders`).
+  (`ImageCacheKey.canonicalHeaders`). Conditional request headers
+  (`If-None-Match` / `If-Modified-Since` / equivalents) are excluded from
+  identity; `Authorization` and other representation headers still participate.
 - Coalesce and durable identity use `ImageCacheKey` (length-prefixed fingerprint
   material; no `url|headers` join). Relative vs absolute `Uri.base` equivalents
-  share one key; explicit `cacheKey` is full identity (headers on wire only).
-  In-flight coalesce keys are **post-middleware** (Bearer `Authorization`
-  participates); durable resolve keys still use request headers / `cacheKey`.
+  share one key. Explicit `cacheKey` is full identity for durable and coalesce
+  (`HttpBytesContext.identityOverride`; headers on wire only). In-flight
+  coalesce keys are post-middleware (Bearer `Authorization` participates;
+  conditionals do not) unless identity override is set. Opt-in
+  [HttpBytesConditionalMiddleware] seeds `If-None-Match` / `If-Modified-Since`
+  from `HttpBytesContext.etag` / `lastModified`. Place after Bearer, before
+  coalesce. `ImageBytesRequest.skipCache` sets cache Skip-cache via
+  `CacheContext` when the store is a middleware wrapper.
 - Distinct URLs that share a basename must not collide on disk (fingerprint).
 - VM store under app **cache** root, not documents. Web ignores `directory`.
 - `MemoryImageBytesCache` / `NoOpImageBytesCache` stay usable after `close`;
@@ -121,6 +134,8 @@ Public API is the barrel `lib/image_bytes_cache.dart`. See
   **flight** `CancelToken.whenCancel` after a slot is acquired; per-caller tokens
   cancel only that subscriber until the last one aborts the flight. Per-send
   overrides live on typed `HttpBytesContext` (sealed `$` exceptions for hosts).
+  Default success is 2xx or 304; empty-body-as-`$Internal` does not apply to 304
+  (illegal 304 bodies are ignored).
 - Chrome open test is the honesty check for Cache/OPFS and a CI merge gate; do
   not merge web blob changes on green VM tests alone.
 

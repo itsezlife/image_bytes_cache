@@ -75,7 +75,11 @@ final class ImageBytesCache$JS implements IImageBytesCache {
   Future<Uint8List?> read(ImageCacheKey key) => _inner.read(key);
 
   @override
-  Future<void> write(ImageCacheKey key, Uint8List bytes) => _inner.write(key, bytes);
+  Future<void> write(
+    ImageCacheKey key,
+    Uint8List bytes, {
+    ImageHttpCacheMeta? httpCacheMeta,
+  }) => _inner.write(key, bytes, httpCacheMeta: httpCacheMeta);
 
   @override
   Future<void> evict(ImageCacheKey key) => _inner.evict(key);
