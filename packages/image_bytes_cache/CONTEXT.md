@@ -69,6 +69,20 @@ Non-positive `maxEntries` / `maxBytes` are asserted invalid.
 _Avoid_: background eviction timers; entry-count-only budgets for large payloads;
 zero or negative capacity caps
 
+**ImageBytesOrigin** (`network` / `cache`):
+Paint-relevant provenance of a resolved body. `cache` means the body was
+served without downloading a new network body (fresh store hit, revalidated
+304 reuse, or stale-served on soft network failure). `network` means a
+downloaded body. Ladder diagnostic ops stay separate from this binary.
+_Avoid_: `durable` in public API names; one origin variant per `resolve_*` log
+op; conflating with Flutter's decoded [ImageCache]
+
+**ImageBytesResolveResult**:
+Full body bytes plus [ImageBytesOrigin]. Returned by an additive rich resolve
+on [IImageBytesResolver]; the existing bytes-only `resolve` stays.
+_Avoid_: breaking `resolve` to return a result type; using diagnostics events as
+the paint origin channel
+
 **ImageBytesResolver** / **ImageBytesRequest**:
 Resolve ladder: rich cache read, then fresh return or conditional /
 unconditional GET, then soft write-through (bytes+meta on 200; meta refresh on
@@ -89,7 +103,9 @@ sets `CacheContext.skipCache` when the store is a middleware wrapper with
 Skip-cache. Empty cached payloads count as a miss. Empty durable writes are not
 retained (evict). Write-through failures do not fail paint; throwing diagnostics
 `onEvent` is swallowed so it cannot become an unhandled async error. Resolve
-remains a single [Future] of the full body, not a public byte stream. Optional
+remains a single [Future] of the full body, not a public byte stream. An
+additive rich resolve returns [ImageBytesResolveResult] (bytes +
+[ImageBytesOrigin]) for paint policy; bytes-only `resolve` remains. Optional
 bytes-progress reporting (cumulative / optional total) may ride with the request
 so paint adapters can surface honest download progress; fresh cache hits do not
 invent mid-flight percents. 412 after conditional falls back to one
@@ -100,7 +116,8 @@ replacing resolve with a streaming public API for progress alone; fake
 progress events that are not tied to real fetch bytes; assuming `skipCache`
 works without Skip-cache middleware; assuming conditional headers without
 Conditional middleware; conflating retention TTL with Cache-Control freshness;
-serving stale on cancel / auth / 404; host `allowStale` flags
+serving stale on cancel / auth / 404; host `allowStale` flags; breaking
+bytes-only `resolve` for origin alone
 
 **ImageHttpCacheFreshness** / **ImageHttpCacheMeta**:
 HTTP freshness policy and per-entry response meta (`etag`, `lastModified`,

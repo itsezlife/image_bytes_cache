@@ -63,17 +63,18 @@ ignore it. Skip forces a miss and write no-op; HTTP still runs.
 honest HTTP body progress. The ladder forwards it to `HttpBytesClient` on a
 network miss only. A durable non-empty cache hit returns bytes without invoking
 the sink. Do not invent mid-download percents from silence. Resolve remains a
-single `Future<Uint8List>` of the full body; there is no public streaming
-resolve API. The sink does not participate in identity or coalesce.
+single completed body (`Future<Uint8List>` or rich `ImageBytesResolveResult`);
+there is no public streaming resolve API. The sink does not participate in
+identity or coalesce.
 
 `ImageBytesResolver` order:
 
 1. Rich cache read (via `execute` with skip context when `skipCache` is set on a
    middleware store; otherwise `readRich` / public `read`). Empty bytes count as
    a miss.
-2. Fresh hit returns bytes immediately. No network, no progress events.
-   Freshness is `ImageHttpCacheFreshness`, separate from `ImageBytesRetention`
-   eviction.
+2. Fresh hit returns bytes immediately with `ImageBytesOrigin.cache`. No
+   network, no progress events. Freshness is `ImageHttpCacheFreshness`,
+   separate from `ImageBytesRetention` eviction.
 3. Stale hit with validators (`etag` / `lastModified`) issues a conditional GET.
    Seeds `HttpBytesContext.etag` / `lastModified` for
    `HttpBytesConditionalMiddleware`. Without that middleware on the client,
@@ -83,20 +84,25 @@ resolve API. The sink does not participate in identity or coalesce.
    with identity override from `cacheKey` and `onBytesProgress` when present.
    When the ladder already held non-empty stale bytes, audible diagnostics emit
    `resolve_unconditional` at debug. Cold misses stay quiet.
-5. 304 returns cached bytes and soft-refreshes meta (`lastValidatedAt` plus any
-   freshness headers on the 304). Bytes are not replaced. Audible diagnostics
-   emit `resolve_revalidated` at debug.
-6. 200 returns new bytes and soft write-through of bytes plus response-derived
-   HTTP meta.
+5. 304 returns cached bytes with `ImageBytesOrigin.cache` and soft-refreshes
+   meta (`lastValidatedAt` plus any freshness headers on the 304). Bytes are
+   not replaced. Audible diagnostics emit `resolve_revalidated` at debug.
+6. 200 returns new bytes with `ImageBytesOrigin.network` and soft write-through
+   of bytes plus response-derived HTTP meta.
 7. 412 after a conditional GET: one unconditional GET, then same as 200 or fail
    (also emits `resolve_unconditional` when cached bytes were held).
 8. `$Network` / `$Timeout` / `$Server` after a non-empty cache hit: return those
-   bytes and emit `resolve_stale_used` when diagnostics are audible. Cancel,
-   auth failures, 404-class `$Request`, and empty or missing cache still throw.
+   bytes with `ImageBytesOrigin.cache` and emit `resolve_stale_used` when
+   diagnostics are audible. Cancel, auth failures, 404-class `$Request`, and
+   empty or missing cache still throw.
 9. Other typed `HttpBytesException` failures propagate. Write-through failures
    report through `ImageBytesDiagnostics` and do not fail `resolve`. A throwing
    host `onEvent` is swallowed inside `report`.
 
+Bytes-only `resolve` returns the body. Additive `resolveRich` returns the same
+body plus binary `ImageBytesOrigin` (`cache` | `network`) for paint policy.
+Ladder `resolve_*` diagnostics stay the detailed channel; origin does not mirror
+every log op.
 Default freshness when `Cache-Control` / `Expires` are absent: validators
 revalidate on every use; no validators retain until retention would drop the
 row. When those headers are present, honor `max-age` / `Expires` (with `Age` /

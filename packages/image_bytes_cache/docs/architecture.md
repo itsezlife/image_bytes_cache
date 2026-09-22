@@ -75,7 +75,8 @@ handles before that surface. Missing VM `directory` still throws
 
 **Paint path:**
 
-`ImageBytesRequest` → `ImageBytesResolver.resolve` →
+`ImageBytesRequest` → `ImageBytesResolver.resolve` /
+`ImageBytesResolver.resolveRich` →
 
 1. Rich cache read (skip context when `skipCache` is set on a middleware
    store). Empty payload counts as miss.
@@ -109,7 +110,7 @@ Everything public is re-exported from `lib/image_bytes_cache.dart`:
 | `image_bytes_cache.dart` | Keys, retention, records, index/blob ports, `IImageBytesCache`, `IndexedImageBytesCache`, Memory/NoOp, `ImageBytesCache` facade |
 | `cache/cache_middleware.dart` | Cache middleware grammar: sealed ops/results (no reclaim), fold wrapper, rich read hit / HTTP cache meta |
 | `cache/middlewares/` | Opt-in Skip-cache + Cache Logger$Developer |
-| `image_bytes_resolver.dart` | `ImageBytesRequest`, `IImageBytesResolver`, `ImageBytesResolver` |
+| `image_bytes_resolver.dart` | `ImageBytesRequest`, `ImageBytesOrigin`, `ImageBytesResolveResult`, `IImageBytesResolver`, `ImageBytesResolver` |
 | `http/http_bytes_client.dart` (+ `http/middlewares/`) | Network GET: middleware chain, typed `$` errors, pool, coalesce |
 | `image_bytes_diagnostics.dart` | Soft-failure policy and events |
 
