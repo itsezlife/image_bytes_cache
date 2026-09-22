@@ -3,12 +3,6 @@ import 'package:image_bytes_cache/image_bytes_cache.dart';
 
 import 'image_fade_policy.dart';
 
-/// Progress chrome from a real download [ImageChunkEvent].
-///
-/// Called only when a non-null chunk exists. Quiet store hits invent no
-/// progress. Named without "Indicator" so hosts are not steered into Material.
-typedef RasterProgressBuilder = Widget Function(BuildContext context, ImageChunkEvent progress);
-
 /// [Image.frameBuilder] / [Image.loadingBuilder] pair from [RasterPaintCompose].
 ///
 /// Closures share one compose session. Create once per image identity (e.g. in
@@ -23,7 +17,7 @@ final class RasterPaintBuilders {
 
   final ImageFrameBuilder frameBuilder;
 
-  /// Non-null only when a [RasterProgressBuilder] was supplied.
+  /// Non-null only when a progress builder was supplied.
   final ImageLoadingBuilder? loadingBuilder;
 }
 
@@ -57,7 +51,7 @@ abstract final class RasterPaintCompose {
   /// Builder closures for one compose session.
   static RasterPaintBuilders builders({
     WidgetBuilder? placeholderBuilder,
-    RasterProgressBuilder? progressBuilder,
+    Widget Function(BuildContext context, ImageChunkEvent progress)? progressBuilder,
     ImageFadePolicy fadePolicy = ImageFadePolicy.standard,
     Duration fadeInDuration = defaultFadeInDuration,
     Duration fadeOutDuration = defaultFadeOutDuration,
@@ -101,7 +95,7 @@ final class _RasterPaintComposeSession {
   });
 
   final WidgetBuilder? placeholderBuilder;
-  final RasterProgressBuilder? progressBuilder;
+  final Widget Function(BuildContext context, ImageChunkEvent progress)? progressBuilder;
   final ImageFadePolicy fadePolicy;
   final Duration fadeInDuration;
   final Duration fadeOutDuration;

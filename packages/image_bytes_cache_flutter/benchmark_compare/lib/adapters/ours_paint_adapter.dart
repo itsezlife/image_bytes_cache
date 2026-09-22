@@ -87,7 +87,7 @@ final class _OursPaintAdapter implements IPaintFeedAdapter {
     _seen.add(key);
     final decodePx = width.round().clamp(1, 4096);
     return CachedNetworkBytesImage(
-      url,
+      imageUrl: url,
       width: width,
       height: height,
       fit: BoxFit.cover,

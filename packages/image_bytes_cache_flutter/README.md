@@ -97,7 +97,7 @@ Or the thin widget when you want near-`Image.network` knobs in one place:
 
 ```dart
 CachedNetworkBytesImage(
-  'https://cdn.example.com/photo.jpg',
+  imageUrl: 'https://cdn.example.com/photo.jpg',
   width: 64,
   height: 64,
   cacheWidth: 64,
@@ -122,10 +122,10 @@ zero fade-out unless you override them.
 
 ```dart
 CachedNetworkBytesImage(
-  'https://cdn.example.com/photo.jpg',
+  imageUrl: 'https://cdn.example.com/photo.jpg',
   width: 96,
   height: 96,
-  placeholderBuilder: (context) => const ColoredBox(color: Color(0xFFE0E0E0)),
+  placeholderBuilder: (context, imageUrl) => const ColoredBox(color: Color(0xFFE0E0E0)),
   progressBuilder: (context, progress) {
     final total = progress.expectedTotalBytes;
     return CircularProgressIndicator(
@@ -156,7 +156,7 @@ That asserts. If you want the raw path instead of the example above:
 
 ```dart
 CachedNetworkBytesImage(
-  'https://cdn.example.com/photo.jpg',
+  imageUrl: 'https://cdn.example.com/photo.jpg',
   frameBuilder: (context, child, frame, wasSynchronouslyLoaded) => child,
   loadingBuilder: (context, child, progress) {
     if (progress == null) return child;

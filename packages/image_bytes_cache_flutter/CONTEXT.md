@@ -38,9 +38,10 @@ _Avoid_: subclassing [ImageInfo] for origin; putting session into provider `==`
 
 **CachedNetworkBytesImage**:
 Thin [Image] over the provider ([Image.network]-like surface). Optional
-compose chrome: [placeholderBuilder], [progressBuilder], [ImageFadePolicy],
-fade durations. High-level builders xor raw frame/loading builders. Soft
-failures via [Image.errorBuilder] / [onError]. Owns a load session in State.
+compose chrome: [placeholderBuilder] (receives [imageUrl]), [progressBuilder],
+[ImageFadePolicy], fade durations. High-level builders xor raw frame/loading
+builders. Soft failures via [Image.errorBuilder] / [onError]. Owns a load
+session in State.
 _Avoid_: chat/avatar chrome or design tokens here; SVG-style sealed load state
 for raster; stacking high-level and raw builders; baking Material progress
 into the package

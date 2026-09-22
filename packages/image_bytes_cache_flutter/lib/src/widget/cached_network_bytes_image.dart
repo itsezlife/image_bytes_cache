@@ -5,6 +5,15 @@ import '../image_provider/cached_network_bytes_image_provider.dart';
 import 'image_fade_policy.dart';
 import 'raster_paint_compose.dart';
 
+/// Progress chrome from a real download [ImageChunkEvent].
+///
+/// Called only when a non-null chunk exists. Quiet store hits invent no
+/// progress. Named without "Indicator" so hosts are not steered into Material.
+typedef ProgressWidgetBuilder = Widget Function(BuildContext context, ImageChunkEvent progress);
+
+/// Waiting chrome before the first frame, with the image URL for host chrome.
+typedef PlaceholderWidgetBuilder = Widget Function(BuildContext context, String imageUrl);
+
 /// Thin [Image] over [CachedNetworkBytesImageProvider].
 ///
 /// Call site near [Image.network]: builders, fit, semantics, gapless playback,
@@ -23,13 +32,13 @@ import 'raster_paint_compose.dart';
 /// State owns a [CachedNetworkBytesLoadSession] shared with the provider and
 /// compose so [ImageFadeSkip.bytesCache] works under [ImageFadePolicy.standard].
 class CachedNetworkBytesImage extends StatefulWidget {
-  /// Creates a thin raster image for [url].
+  /// Creates a thin raster image for [imageUrl].
   ///
   /// Null [resolver] uses [ImageBytesResolver.shared]. High-level chrome knobs
   /// must not be combined with [frameBuilder] / [loadingBuilder].
-  const CachedNetworkBytesImage(
-    this.url, {
+  const CachedNetworkBytesImage({
     super.key,
+    required this.imageUrl,
     this.scale = 1.0,
     this.frameBuilder,
     this.loadingBuilder,
@@ -88,8 +97,8 @@ class CachedNetworkBytesImage extends StatefulWidget {
        );
 
   static bool _hasHighLevelChrome({
-    required WidgetBuilder? placeholderBuilder,
-    required RasterProgressBuilder? progressBuilder,
+    required PlaceholderWidgetBuilder? placeholderBuilder,
+    required ProgressWidgetBuilder? progressBuilder,
     required ImageFadePolicy? fadePolicy,
     required Duration? fadeInDuration,
     required Duration? fadeOutDuration,
@@ -102,7 +111,7 @@ class CachedNetworkBytesImage extends StatefulWidget {
   }
 
   /// Absolute or [Uri.base]-relative image URL.
-  final String url;
+  final String imageUrl;
 
   /// Linear scale for decoded [ImageInfo].
   final double scale;
@@ -130,14 +139,14 @@ class CachedNetworkBytesImage extends StatefulWidget {
   /// Xor with high-level chrome knobs.
   final ImageLoadingBuilder? loadingBuilder;
 
-  /// Waiting chrome when high-level knobs are on. Replaced by
-  /// [progressBuilder] on real chunks. Empty box when null but other chrome
-  /// knobs are set.
-  final WidgetBuilder? placeholderBuilder;
+  /// Waiting chrome when high-level knobs are on. Receives [imageUrl].
+  /// Replaced by [progressBuilder] on real chunks. Empty box when null but
+  /// other chrome knobs are set.
+  final PlaceholderWidgetBuilder? placeholderBuilder;
 
   /// Real [ImageChunkEvent] chrome when high-level knobs are on. Quiet
   /// resolves never call this.
-  final RasterProgressBuilder? progressBuilder;
+  final ProgressWidgetBuilder? progressBuilder;
 
   /// Defaults to [ImageFadePolicy.standard] when high-level chrome is on.
   final ImageFadePolicy? fadePolicy;
@@ -234,7 +243,8 @@ class _CachedNetworkBytesImageState extends State<CachedNetworkBytesImage> {
   @override
   void didUpdateWidget(CachedNetworkBytesImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.placeholderBuilder != widget.placeholderBuilder ||
+    if (oldWidget.imageUrl != widget.imageUrl ||
+        oldWidget.placeholderBuilder != widget.placeholderBuilder ||
         oldWidget.progressBuilder != widget.progressBuilder ||
         oldWidget.fadePolicy != widget.fadePolicy ||
         oldWidget.fadeInDuration != widget.fadeInDuration ||
@@ -249,8 +259,13 @@ class _CachedNetworkBytesImageState extends State<CachedNetworkBytesImage> {
       _composed = null;
       return;
     }
+    final imageUrl = widget.imageUrl;
+    final placeholderBuilder = widget.placeholderBuilder;
     _composed = RasterPaintCompose.builders(
-      placeholderBuilder: widget.placeholderBuilder,
+      placeholderBuilder: switch (placeholderBuilder) {
+        final builder? => (context) => builder(context, imageUrl),
+        null => null,
+      },
       progressBuilder: widget.progressBuilder,
       fadePolicy: widget.fadePolicy ?? ImageFadePolicy.standard,
       fadeInDuration: widget.fadeInDuration ?? RasterPaintCompose.defaultFadeInDuration,
@@ -261,7 +276,7 @@ class _CachedNetworkBytesImageState extends State<CachedNetworkBytesImage> {
 
   CachedNetworkBytesImageProvider _providerFor(CachedNetworkBytesImage w) {
     return CachedNetworkBytesImageProvider(
-      w.url,
+      w.imageUrl,
       scale: w.scale,
       headers: w.headers,
       cacheWidth: w.cacheWidth,

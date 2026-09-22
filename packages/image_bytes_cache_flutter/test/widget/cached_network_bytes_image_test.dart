@@ -45,7 +45,7 @@ void main() {
       await tester.pumpWidget(
         wrap(
           CachedNetworkBytesImage(
-            'https://cdn.example.com/ok.png',
+            imageUrl: 'https://cdn.example.com/ok.png',
             resolver: resolver,
             width: 24,
             height: 24,
@@ -72,7 +72,7 @@ void main() {
       await tester.pumpWidget(
         wrap(
           CachedNetworkBytesImage(
-            'https://cdn.example.com/missing.png',
+            imageUrl: 'https://cdn.example.com/missing.png',
             resolver: resolver,
             onError: (error, stackTrace) => errors.add(error),
             errorBuilder: (_, error, __) {
@@ -104,7 +104,7 @@ void main() {
         await tester.pumpWidget(
           wrap(
             CachedNetworkBytesImage(
-              'https://cdn.example.com/missing.png',
+              imageUrl: 'https://cdn.example.com/missing.png',
               resolver: resolver,
               onError: (error, stackTrace) => errors.add(error),
               // errorBuilder paints UI only; must not also side-report onError.
@@ -134,7 +134,7 @@ void main() {
         await tester.pumpWidget(
           wrap(
             CachedNetworkBytesImage(
-              'https://cdn.example.com/downscale.png',
+              imageUrl: 'https://cdn.example.com/downscale.png',
               cacheWidth: 2,
               cacheHeight: 2,
               resolver: resolver,
@@ -181,16 +181,19 @@ void main() {
         await tester.pumpWidget(
           wrapChrome(
             CachedNetworkBytesImage(
-              'https://cdn.example.com/placeholder.png',
+              imageUrl: 'https://cdn.example.com/placeholder.png',
               resolver: resolver,
-              placeholderBuilder: (_) => const Text('waiting…'),
+              placeholderBuilder: (_, imageUrl) => Text('waiting $imageUrl'),
               fadeInDuration: Duration.zero,
             ),
           ),
         );
         await tester.pump();
 
-        expect(find.text('waiting…'), findsOneWidget);
+        expect(
+          find.text('waiting https://cdn.example.com/placeholder.png'),
+          findsOneWidget,
+        );
         expect(find.byType(RawImage), findsNothing);
 
         await tester.runAsync(() async {
@@ -200,7 +203,10 @@ void main() {
         await tester.pump();
 
         expect(find.byType(RawImage), findsOneWidget);
-        expect(find.text('waiting…'), findsNothing);
+        expect(
+          find.text('waiting https://cdn.example.com/placeholder.png'),
+          findsNothing,
+        );
       });
 
       testWidgets('progress replaces placeholder on chunk events', (tester) async {
@@ -216,9 +222,9 @@ void main() {
         await tester.pumpWidget(
           wrapChrome(
             CachedNetworkBytesImage(
-              'https://cdn.example.com/progress.png',
+              imageUrl: 'https://cdn.example.com/progress.png',
               resolver: resolver,
-              placeholderBuilder: (_) => const Text('waiting…'),
+              placeholderBuilder: (_, __) => const Text('waiting…'),
               progressBuilder: (_, progress) => Text(
                 'progress ${progress.cumulativeBytesLoaded}',
               ),
@@ -265,9 +271,9 @@ void main() {
         await tester.pumpWidget(
           wrapChrome(
             CachedNetworkBytesImage(
-              'https://cdn.example.com/quiet.png',
+              imageUrl: 'https://cdn.example.com/quiet.png',
               resolver: resolver,
-              placeholderBuilder: (_) => const Text('waiting…'),
+              placeholderBuilder: (_, __) => const Text('waiting…'),
               progressBuilder: (_, __) {
                 progressBuilds++;
                 return const Text('progress');
@@ -330,7 +336,7 @@ void main() {
         await tester.pumpWidget(
           wrapChrome(
             CachedNetworkBytesImage(
-              'https://cdn.example.com/async-fade.png',
+              imageUrl: 'https://cdn.example.com/async-fade.png',
               resolver: resolver,
               fadePolicy: const ImageFadePolicy(ImageFadeSkip.imageCache),
               fadeInDuration: const Duration(milliseconds: 300),
@@ -350,7 +356,7 @@ void main() {
         await tester.pumpWidget(
           wrapChrome(
             CachedNetworkBytesImage(
-              'https://cdn.example.com/zero-fade.png',
+              imageUrl: 'https://cdn.example.com/zero-fade.png',
               resolver: resolver,
               fadeInDuration: Duration.zero,
             ),
@@ -369,7 +375,7 @@ void main() {
         await tester.pumpWidget(
           wrapChrome(
             CachedNetworkBytesImage(
-              'https://cdn.example.com/never-fade.png',
+              imageUrl: 'https://cdn.example.com/never-fade.png',
               resolver: resolver,
               fadePolicy: ImageFadePolicy.never,
               fadeInDuration: const Duration(milliseconds: 300),
@@ -396,7 +402,7 @@ void main() {
         await tester.pumpWidget(
           wrapChrome(
             CachedNetworkBytesImage(
-              'https://cdn.example.com/store-hit.png',
+              imageUrl: 'https://cdn.example.com/store-hit.png',
               resolver: resolver,
               fadePolicy: ImageFadePolicy.standard,
               fadeInDuration: const Duration(milliseconds: 300),
@@ -420,7 +426,7 @@ void main() {
         await tester.pumpWidget(
           wrapChrome(
             CachedNetworkBytesImage(
-              'https://cdn.example.com/network-fade.png',
+              imageUrl: 'https://cdn.example.com/network-fade.png',
               resolver: resolver,
               fadePolicy: ImageFadePolicy.standard,
               fadeInDuration: const Duration(milliseconds: 300),
@@ -437,15 +443,15 @@ void main() {
       test('high-level chrome xor raw builders asserts', () {
         expect(
           () => CachedNetworkBytesImage(
-            'https://cdn.example.com/xor.png',
-            placeholderBuilder: (_) => const SizedBox.shrink(),
+            imageUrl: 'https://cdn.example.com/xor.png',
+            placeholderBuilder: (_, __) => const SizedBox.shrink(),
             frameBuilder: (context, child, frame, sync) => child,
           ),
           throwsAssertionError,
         );
         expect(
           () => CachedNetworkBytesImage(
-            'https://cdn.example.com/xor.png',
+            imageUrl: 'https://cdn.example.com/xor.png',
             fadeInDuration: const Duration(milliseconds: 300),
             loadingBuilder: (context, child, progress) => child,
           ),
