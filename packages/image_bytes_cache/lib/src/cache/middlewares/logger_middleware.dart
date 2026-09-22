@@ -1,6 +1,7 @@
 import 'dart:developer' as developer;
 
 import 'package:image_bytes_cache/src/cache/cache_middleware.dart';
+import 'package:image_bytes_cache/src/util/byte_count_format.dart';
 import 'package:meta/meta.dart';
 
 /// {@template cache_logger_middleware_developer}
@@ -92,13 +93,14 @@ final class CacheLoggerMiddleware$Developer {
 
   static String _outcome(CacheOperation operation, CacheOperationResult result) {
     return switch ((operation, result)) {
-      (CacheOperation$Read(), CacheOperationResult$Read(:final hit?)) => 'read hit (${hit.bytes.length} bytes)',
+      (CacheOperation$Read(), CacheOperationResult$Read(:final hit?)) =>
+        'read hit (${ByteCountFormat.format(hit.bytes.length)})',
       (CacheOperation$Read(), CacheOperationResult$Read()) => 'read miss',
       (CacheOperation$Write(), CacheOperationResult$Write()) => 'write ok',
       (CacheOperation$Evict(), CacheOperationResult$Evict()) => 'evict ok',
       (CacheOperation$Prune(), CacheOperationResult$Prune(:final report)) =>
         'prune ok (keys=${report.evictedKeys.length}, '
-            'bytes=${report.freedBytes})',
+            'bytes=${ByteCountFormat.format(report.freedBytes)})',
       (CacheOperation$Close(), CacheOperationResult$Close()) => 'close ok',
       _ => 'unexpected ${result.runtimeType}',
     };

@@ -3,6 +3,7 @@ import 'dart:developer' as developer;
 
 import 'package:http/http.dart' as http;
 import 'package:image_bytes_cache/src/http/http_bytes_client.dart';
+import 'package:image_bytes_cache/src/util/byte_count_format.dart';
 import 'package:meta/meta.dart';
 
 /// {@template http_bytes_logger_middleware_developer}
@@ -77,7 +78,7 @@ final class HttpBytesLoggerMiddleware$Developer {
         stopwatch.stop();
         _emit(
           '$label -> ${response.statusCode} | '
-          '${_formatByteCount(body.lengthInBytes)} | '
+          '${ByteCountFormat.format(body.lengthInBytes)} | '
           '${stopwatch.elapsedMilliseconds}ms',
           level: 300,
         );
@@ -97,7 +98,7 @@ final class HttpBytesLoggerMiddleware$Developer {
             stopwatch.stop();
             _emit(
               '$label -> ${response.statusCode} | '
-              '${_formatByteCount(received)} | '
+              '${ByteCountFormat.format(received)} | '
               '${stopwatch.elapsedMilliseconds}ms',
               level: 300,
             );
@@ -112,7 +113,7 @@ final class HttpBytesLoggerMiddleware$Developer {
               };
               _emit(
                 '$label -> $code | '
-                '${_formatByteCount(received)} | '
+                '${ByteCountFormat.format(received)} | '
                 '${stopwatch.elapsedMilliseconds}ms',
                 level: 900,
                 stackTrace: stackTrace,
@@ -163,15 +164,3 @@ final class HttpBytesLoggerMiddleware$Developer {
     }
   }
 }
-
-/// Compact, developer-friendly size: `384 B`, `12.4 KB`, `1.8 MB`, …
-String _formatByteCount(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  final kb = bytes / 1024;
-  if (kb < 1024) return '${_prettyFixed(kb)} KB';
-  final mb = kb / 1024;
-  if (mb < 1024) return '${_prettyFixed(mb)} MB';
-  return '${_prettyFixed(mb / 1024)} GB';
-}
-
-String _prettyFixed(double value) => value < 10 ? value.toStringAsFixed(1) : value.round().toString();

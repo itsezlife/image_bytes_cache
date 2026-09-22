@@ -30,8 +30,32 @@ void main() {
       expect(lines, hasLength(2));
       expect(lines.first, contains('read hit'));
       expect(lines.first, contains('logo'));
+      expect(lines.first, contains('2 B'));
       expect(lines.last, contains('read miss'));
       expect(lines.last, contains('missing'));
+    });
+
+    test('formats larger hit sizes like HTTP logger', () async {
+      final lines = <String>[];
+      final inner = MemoryImageBytesCache();
+      const key = ImageCacheKey('big');
+      // 1536 bytes → 1.5 KB
+      final bytes = Uint8List(1536);
+      await inner.write(key, bytes);
+
+      final cache = MiddlewareImageBytesCache(
+        inner: inner,
+        middlewares: <CacheMiddleware>[
+          CacheLoggerMiddleware$Developer(
+            debugEmit: (message, {required level, stackTrace}) {
+              lines.add(message);
+            },
+          ),
+        ],
+      );
+
+      expect(await cache.read(key), bytes);
+      expect(lines.single, contains('read hit (1.5 KB)'));
     });
 
     test('emits evict and prune without reclaim', () async {
