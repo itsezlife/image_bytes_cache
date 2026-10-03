@@ -1,3 +1,16 @@
+## 0.4.0
+
+- **ADDED**: Before, setting both `cacheWidth` and `cacheHeight` always
+  decoded at exactly that box, so an image whose aspect differed from the box
+  was stretched (`BoxFit.cover` then painted the distorted bitmap), and an
+  external `ResizeImage` could only offer exact or fit. Now
+  `CachedNetworkBytesImageProvider` and `CachedNetworkBytesImage` take
+  `decodeSizePolicy`: `ImageDecodeSizePolicy.exact` (default, unchanged),
+  `fit` (largest aspect-preserving size inside the box), or `cover` (smallest
+  aspect-preserving size that covers the box). The policy joins Flutter
+  `ImageCache` identity only when both dims are set; durable `ImageCacheKey`
+  is unchanged.
+
 ## 0.3.0
 
 - **ADDED**: Before, raster hosts wired raw `frameBuilder` / `loadingBuilder`

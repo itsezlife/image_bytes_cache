@@ -93,6 +93,24 @@ Image(
 );
 ```
 
+Both dims decode at exactly that box by default, like `Image.network`. When the
+image aspect may differ from the box, pick an aspect-preserving policy that
+matches how you paint it:
+
+```dart
+Image(
+  image: CachedNetworkBytesImageProvider.sized(
+    'https://cdn.example.com/photo.jpg',
+    cacheWidth: 300,
+    cacheHeight: 200,
+    decodeSizePolicy: ImageDecodeSizePolicy.cover, // or .fit for BoxFit.contain
+  ),
+  width: 150,
+  height: 100,
+  fit: BoxFit.cover,
+);
+```
+
 Or the thin widget when you want near-`Image.network` knobs in one place:
 
 ```dart

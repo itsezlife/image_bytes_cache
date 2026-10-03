@@ -30,6 +30,14 @@ _Avoid_: opening files/sockets; forking the store key by decode size;
 PageStorage on this path; sealed load state beside [ImageStream]; subclassing
 [ImageInfo] for origin; treating [errorListener] as a product logger
 
+**ImageDecodeSizePolicy** (`exact` / `fit` / `cover`):
+How a two-axis decode box maps onto the intrinsic size. `exact` (default)
+matches [Image.network] `cacheWidth` / `cacheHeight`; `fit` and `cover` keep
+the aspect ratio. Joins Flutter [ImageCache] identity only when both dims are
+set.
+_Avoid_: stacking [ResizeImage] on a sized provider to change policy; `exact`
+under [BoxFit.cover] when the box aspect differs from the image
+
 **CachedNetworkBytesLoadSession**:
 Holds [ImageBytesOrigin] for one provider load. Same instance goes to the
 provider and to compose `originOf`. Omitted from Flutter [ImageCache]

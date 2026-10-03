@@ -556,6 +556,128 @@ void main() {
         expect(resolver.requests, hasLength(1));
       },
     );
+
+    test('decodeSizePolicy splits identity only for a two-axis decode box', () {
+      const exactBox = CachedNetworkBytesImageProvider.sized(
+        'https://cdn.example.com/photo.png',
+        cacheWidth: 32,
+        cacheHeight: 32,
+      );
+      const coverBox = CachedNetworkBytesImageProvider.sized(
+        'https://cdn.example.com/photo.png',
+        cacheWidth: 32,
+        cacheHeight: 32,
+        decodeSizePolicy: ImageDecodeSizePolicy.cover,
+      );
+      const exactWidth = CachedNetworkBytesImageProvider.sized(
+        'https://cdn.example.com/photo.png',
+        cacheWidth: 32,
+      );
+      const coverWidth = CachedNetworkBytesImageProvider.sized(
+        'https://cdn.example.com/photo.png',
+        cacheWidth: 32,
+        decodeSizePolicy: ImageDecodeSizePolicy.cover,
+      );
+      const unsizedFit = CachedNetworkBytesImageProvider(
+        'https://cdn.example.com/photo.png',
+        decodeSizePolicy: ImageDecodeSizePolicy.fit,
+      );
+      const unsized = CachedNetworkBytesImageProvider(
+        'https://cdn.example.com/photo.png',
+      );
+
+      expect(exactBox, isNot(equals(coverBox)));
+      expect(exactWidth, equals(coverWidth));
+      expect(exactWidth.hashCode, coverWidth.hashCode);
+      expect(unsized, equals(unsizedFit));
+      expect(unsized.hashCode, unsizedFit.hashCode);
+    });
+
+    for (final (policy, width, height) in [
+      (ImageDecodeSizePolicy.exact, 2, 2),
+      (ImageDecodeSizePolicy.fit, 2, 1),
+      (ImageDecodeSizePolicy.cover, 4, 2),
+    ]) {
+      testWidgets('${policy.name} decodes an 8×4 image in a 2×2 box at $width×$height', (tester) async {
+        resolver.bytes = eightByFourPngBytes();
+
+        await tester.pumpWidget(
+          wrap(
+            Image(
+              image: CachedNetworkBytesImageProvider.sized(
+                'https://cdn.example.com/${policy.name}.png',
+                cacheWidth: 2,
+                cacheHeight: 2,
+                decodeSizePolicy: policy,
+                resolver: resolver,
+              ),
+            ),
+          ),
+        );
+
+        await settle(tester, () {
+          final found = find.byType(RawImage);
+          return found.evaluate().isNotEmpty && tester.widget<RawImage>(found).image != null;
+        });
+        await tester.pump();
+
+        final image = tester.widget<RawImage>(find.byType(RawImage)).image;
+        expect(image, isNotNull);
+        expect(image!.width, width);
+        expect(image.height, height);
+      });
+    }
+  });
+
+  group('ImageDecodeSizePolicy.targetSize', () {
+    ui.TargetImageSize target(
+      ImageDecodeSizePolicy policy, {
+      int? width,
+      int? height,
+      bool allowUpscaling = false,
+    }) {
+      return policy.targetSize(
+        intrinsicWidth: 400,
+        intrinsicHeight: 200,
+        width: width,
+        height: height,
+        allowUpscaling: allowUpscaling,
+      );
+    }
+
+    void expectTarget(ui.TargetImageSize actual, {int? width, int? height}) {
+      expect((actual.width, actual.height), (width, height));
+    }
+
+    test('exact keeps both box dims', () {
+      expectTarget(target(ImageDecodeSizePolicy.exact, width: 100, height: 100), width: 100, height: 100);
+    });
+
+    test('fit drives the tighter axis', () {
+      expectTarget(target(ImageDecodeSizePolicy.fit, width: 100, height: 100), width: 100);
+      expectTarget(target(ImageDecodeSizePolicy.fit, width: 400, height: 50), height: 50);
+    });
+
+    test('cover drives the looser axis', () {
+      expectTarget(target(ImageDecodeSizePolicy.cover, width: 100, height: 100), height: 100);
+      expectTarget(target(ImageDecodeSizePolicy.cover, width: 400, height: 50), width: 400);
+    });
+
+    test('a single axis passes through for every policy', () {
+      for (final policy in ImageDecodeSizePolicy.values) {
+        expectTarget(target(policy, width: 100), width: 100);
+        expectTarget(target(policy, height: 50), height: 50);
+      }
+    });
+
+    test('clamps the driving axis to intrinsic unless allowUpscaling', () {
+      expectTarget(target(ImageDecodeSizePolicy.cover, width: 1000, height: 1000), height: 200);
+      expectTarget(target(ImageDecodeSizePolicy.exact, width: 1000, height: 1000), width: 400, height: 200);
+      expectTarget(
+        target(ImageDecodeSizePolicy.cover, width: 1000, height: 1000, allowUpscaling: true),
+        height: 1000,
+      );
+    });
   });
 }
 
@@ -573,6 +695,15 @@ Uint8List eightByEightPngBytes() {
   return Uint8List.fromList(
     base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC',
+    ),
+  );
+}
+
+/// Opaque 8×4 RGB PNG — non-square fixture for aspect-preserving decode.
+Uint8List eightByFourPngBytes() {
+  return Uint8List.fromList(
+    base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAECAIAAAA8r+mnAAAAEUlEQVR4nGNwaDiAFTFQTwIAUOswAfJrQPMAAAAASUVORK5CYII=',
     ),
   );
 }

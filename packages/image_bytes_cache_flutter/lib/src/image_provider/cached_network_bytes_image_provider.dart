@@ -36,6 +36,61 @@ final class CachedNetworkBytesLoadSession {
   }
 }
 
+/// How a decode box (`cacheWidth` × `cacheHeight`) maps onto the intrinsic
+/// image size.
+///
+/// Only matters when both dims are set: with one dim, every policy scales the
+/// other axis proportionally. Without `allowUpscaling`, the result never
+/// exceeds the intrinsic size.
+enum ImageDecodeSizePolicy {
+  /// Decode at exactly the box; the aspect ratio follows the box.
+  ///
+  /// Same as [ResizeImagePolicy.exact] and [Image.network] `cacheWidth` /
+  /// `cacheHeight`. Distorts an image whose aspect differs from the box.
+  exact,
+
+  /// Largest aspect-preserving size inside the box. Pair with [BoxFit.contain].
+  ///
+  /// Same as [ResizeImagePolicy.fit].
+  fit,
+
+  /// Smallest aspect-preserving size that covers the box. Pair with
+  /// [BoxFit.cover], where [fit] would decode too small and blur.
+  cover
+  ;
+
+  /// Decode target for an image of [intrinsicWidth] × [intrinsicHeight]
+  /// requested at [width] × [height].
+  ui.TargetImageSize targetSize({
+    required int intrinsicWidth,
+    required int intrinsicHeight,
+    required int? width,
+    required int? height,
+    required bool allowUpscaling,
+  }) {
+    int? clamp(int? target, int intrinsic) => switch (target) {
+      final target? when !allowUpscaling && target > intrinsic => intrinsic,
+      _ => target,
+    };
+
+    // Passing a single axis lets the engine derive the other one from the
+    // intrinsic aspect, so fit / cover never distort.
+    ui.TargetImageSize byWidth(int width) => ui.TargetImageSize(width: clamp(width, intrinsicWidth));
+    ui.TargetImageSize byHeight(int height) => ui.TargetImageSize(height: clamp(height, intrinsicHeight));
+
+    return switch ((this, width, height)) {
+      (ImageDecodeSizePolicy.fit, final width?, final height?) =>
+        width / intrinsicWidth <= height / intrinsicHeight ? byWidth(width) : byHeight(height),
+      (ImageDecodeSizePolicy.cover, final width?, final height?) =>
+        width / intrinsicWidth >= height / intrinsicHeight ? byWidth(width) : byHeight(height),
+      _ => ui.TargetImageSize(
+        width: clamp(width, intrinsicWidth),
+        height: clamp(height, intrinsicHeight),
+      ),
+    };
+  }
+}
+
 /// [ImageProvider] that resolves remote bytes via [IImageBytesResolver], then
 /// decodes with Flutter's codecs (PNG, JPEG, WebP, GIF, …).
 ///
@@ -49,8 +104,12 @@ final class CachedNetworkBytesLoadSession {
 /// Network-miss [ImageBytesRequest.onBytesProgress] becomes [ImageChunkEvent]s.
 /// A store hit stays quiet; that silence is not 0% progress.
 ///
+/// A two-axis decode box follows [decodeSizePolicy]: [ImageDecodeSizePolicy.exact]
+/// by default ([Image.network] parity), or aspect-preserving
+/// [ImageDecodeSizePolicy.fit] / [ImageDecodeSizePolicy.cover].
+///
 /// Flutter [ImageCache] identity is [cacheKey] + [scale] + optional decode size
-/// ([cacheWidth] / [cacheHeight] / [allowUpscaling]). Durable store and HTTP
+/// ([cacheWidth] / [cacheHeight] / [allowUpscaling] / [decodeSizePolicy]). Durable store and HTTP
 /// coalesce stay [ImageCacheKey] alone ([ImageCacheKey.fromUrl] of [url] +
 /// [headers]). This type never takes an [ImageBytesRequest.cacheKey] override.
 /// [resolver], [errorListener], and [loadSession] are wiring only and are
@@ -79,6 +138,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
     this.cacheWidth,
     this.cacheHeight,
     this.allowUpscaling = false,
+    this.decodeSizePolicy = ImageDecodeSizePolicy.exact,
     this.resolver,
     this.errorListener,
     this.loadSession,
@@ -101,6 +161,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
     this.cacheWidth,
     this.cacheHeight,
     this.allowUpscaling = false,
+    this.decodeSizePolicy = ImageDecodeSizePolicy.exact,
     this.resolver,
     this.errorListener,
     this.loadSession,
@@ -132,7 +193,8 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
   /// Target decode width in pixels, or null for intrinsic / height-only.
   ///
   /// Part of Flutter [ImageCache] identity, not durable [ImageCacheKey].
-  /// [ResizeImagePolicy.exact] semantics (clamp unless [allowUpscaling]).
+  /// Mapped onto the intrinsic size by [decodeSizePolicy] (clamp unless
+  /// [allowUpscaling]).
   final int? cacheWidth;
 
   /// Target decode height in pixels, or null for intrinsic / width-only.
@@ -143,6 +205,12 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
   /// Part of Flutter [ImageCache] identity when a decode size is set; ignored
   /// when both dims are null.
   final bool allowUpscaling;
+
+  /// How a two-axis decode box maps onto the intrinsic size. Default
+  /// [ImageDecodeSizePolicy.exact]. Part of Flutter [ImageCache] identity only
+  /// when both [cacheWidth] and [cacheHeight] are set; otherwise every policy
+  /// decodes the same bitmap.
+  final ImageDecodeSizePolicy decodeSizePolicy;
 
   /// Defaults to [ImageBytesResolver.shared]. Omitted from [operator ==].
   final IImageBytesResolver? resolver;
@@ -164,6 +232,11 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
   ImageCacheKey get cacheKey => ImageCacheKey.fromUrl(url, headers: headers);
 
   bool get _hasDecodeSize => cacheWidth != null || cacheHeight != null;
+
+  // Canonical form for identity: with fewer than two dims every policy decodes
+  // the same bitmap, so a no-op policy must not split ImageCache.
+  ImageDecodeSizePolicy get _effectiveDecodeSizePolicy =>
+      cacheWidth != null && cacheHeight != null ? decodeSizePolicy : ImageDecodeSizePolicy.exact;
 
   IImageBytesResolver get _resolver => resolver ?? ImageBytesResolver.shared();
 
@@ -255,23 +328,13 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
 
       return await decode(
         buffer,
-        getTargetSize: (intrinsicWidth, intrinsicHeight) {
-          // ResizeImagePolicy.exact: host dims as targets, clamp unless
-          // allowUpscaling — same contract as Image.network / ResizeImage.
-          var targetWidth = key.cacheWidth;
-          var targetHeight = key.cacheHeight;
-
-          if (!key.allowUpscaling) {
-            if (targetWidth != null && targetWidth > intrinsicWidth) {
-              targetWidth = intrinsicWidth;
-            }
-            if (targetHeight != null && targetHeight > intrinsicHeight) {
-              targetHeight = intrinsicHeight;
-            }
-          }
-
-          return ui.TargetImageSize(width: targetWidth, height: targetHeight);
-        },
+        getTargetSize: (intrinsicWidth, intrinsicHeight) => key.decodeSizePolicy.targetSize(
+          intrinsicWidth: intrinsicWidth,
+          intrinsicHeight: intrinsicHeight,
+          width: key.cacheWidth,
+          height: key.cacheHeight,
+          allowUpscaling: key.allowUpscaling,
+        ),
       );
     } catch (error) {
       // Next microtask: sync evict can miss a still-pending ImageCache entry.
@@ -310,7 +373,8 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
         other.cacheHeight == cacheHeight &&
         // allowUpscaling is meaningless without a decode size; ignore it so
         // unsized providers do not split ImageCache on a no-op flag.
-        (!_hasDecodeSize || other.allowUpscaling == allowUpscaling);
+        (!_hasDecodeSize || other.allowUpscaling == allowUpscaling) &&
+        other._effectiveDecodeSizePolicy == _effectiveDecodeSizePolicy;
   }
 
   @override
@@ -320,6 +384,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
     cacheWidth,
     cacheHeight,
     _hasDecodeSize ? allowUpscaling : null,
+    _effectiveDecodeSizePolicy,
   );
 
   @override
@@ -327,6 +392,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
       '${objectRuntimeType(this, 'CachedNetworkBytesImageProvider')}'
       '("$url", scale: ${scale.toStringAsFixed(1)}'
       '${_hasDecodeSize ? ', cacheWidth: $cacheWidth, cacheHeight: $cacheHeight'
-                ', allowUpscaling: $allowUpscaling' : ''}'
+                ', allowUpscaling: $allowUpscaling'
+                ', decodeSizePolicy: ${_effectiveDecodeSizePolicy.name}' : ''}'
       ', cacheKey: $cacheKey)';
 }

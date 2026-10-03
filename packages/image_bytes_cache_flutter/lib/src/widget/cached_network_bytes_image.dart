@@ -68,6 +68,7 @@ class CachedNetworkBytesImage extends StatefulWidget {
     this.cacheWidth,
     this.cacheHeight,
     this.allowUpscaling = false,
+    this.decodeSizePolicy = ImageDecodeSizePolicy.exact,
     this.resolver,
   }) : assert(
          cacheWidth == null || cacheWidth > 0,
@@ -131,6 +132,12 @@ class CachedNetworkBytesImage extends StatefulWidget {
 
   /// Whether decode dims may exceed intrinsic size. Default false.
   final bool allowUpscaling;
+
+  /// How a two-axis decode box maps onto the intrinsic size. Match it to
+  /// [fit]: [ImageDecodeSizePolicy.cover] for [BoxFit.cover],
+  /// [ImageDecodeSizePolicy.fit] for [BoxFit.contain]. Default
+  /// [ImageDecodeSizePolicy.exact].
+  final ImageDecodeSizePolicy decodeSizePolicy;
 
   /// See [Image.frameBuilder]. Xor with high-level chrome knobs.
   final ImageFrameBuilder? frameBuilder;
@@ -282,6 +289,7 @@ class _CachedNetworkBytesImageState extends State<CachedNetworkBytesImage> {
       cacheWidth: w.cacheWidth,
       cacheHeight: w.cacheHeight,
       allowUpscaling: w.allowUpscaling,
+      decodeSizePolicy: w.decodeSizePolicy,
       resolver: w.resolver,
       errorListener: w.onError == null ? null : _forwardOnError,
       loadSession: _loadSession,
