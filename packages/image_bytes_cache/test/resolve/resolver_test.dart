@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:cancel_token/cancel_token.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:image_bytes_cache/src/cache/cache_middleware.dart';
@@ -458,6 +459,64 @@ void main() {
           ),
         ),
       );
+    });
+  });
+
+  group('ImageBytesRequest.cancelToken', () {
+    const url = 'https://cdn.example.com/cancel.png';
+    final body = Uint8List.fromList([1, 2, 3]);
+
+    /// Holds every GET until [release]; an abort trigger fails it instead.
+    ({HttpBytesClient client, Completer<void> release, List<bool> aborts}) holdingClient() {
+      final release = Completer<void>();
+      final aborts = <bool>[];
+      final client = HttpBytesClient(
+        client: MockClient.streaming((request, _) async {
+          final abortTrigger = switch (request) {
+            http.Abortable(:final abortTrigger?) => abortTrigger,
+            _ => Completer<void>().future,
+          };
+          final aborted = await Future.any([
+            abortTrigger.then((_) => true),
+            release.future.then((_) => false),
+          ]);
+          aborts.add(aborted);
+          if (aborted) throw http.RequestAbortedException(request.url);
+          return http.StreamedResponse(Stream.value(body), 200);
+        }),
+      );
+      addTearDown(client.close);
+      return (client: client, release: release, aborts: aborts);
+    }
+
+    test(r'cancel aborts the network GET and fails with $Cancelled', () async {
+      final (:client, release: _, :aborts) = holdingClient();
+      final resolver = ImageBytesResolver(cache: MemoryImageBytesCache(), client: client);
+      final token = CancelToken();
+
+      final resolved = resolver.resolve(ImageBytesRequest(url: url, cancelToken: token));
+      await pumpEventQueue();
+      token.cancel();
+
+      await expectLater(resolved, throwsA(isA<HttpBytesException$Cancelled>()));
+      await pumpEventQueue();
+      expect(aborts, [true]);
+    });
+
+    test('cancel of one coalesced caller leaves the shared GET running', () async {
+      final (:client, :release, :aborts) = holdingClient();
+      final resolver = ImageBytesResolver(cache: MemoryImageBytesCache(), client: client);
+      final token = CancelToken();
+
+      final cancelled = resolver.resolve(ImageBytesRequest(url: url, cancelToken: token));
+      final kept = resolver.resolve(const ImageBytesRequest(url: url));
+      await pumpEventQueue();
+      token.cancel();
+      await expectLater(cancelled, throwsA(isA<HttpBytesException$Cancelled>()));
+
+      release.complete();
+      expect(await kept, body);
+      expect(aborts, [false]);
     });
   });
 

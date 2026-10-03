@@ -1,3 +1,11 @@
+## 0.4.1
+
+- **ADDED**: Before, a resolve could not be stopped once started. Now
+  `ImageBytesRequest.cancelToken` is forwarded to `HttpBytesClient.send` as the
+  per-caller token: cancelling fails the resolve with
+  `HttpBytesException$Cancelled`, and the GET aborts once its last coalesced
+  caller cancels.
+
 ## 0.4.0
 
 - **ADDED**: Before, hosts only got bytes from `resolve`. Now

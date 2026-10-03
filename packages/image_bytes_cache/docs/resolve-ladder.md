@@ -43,7 +43,7 @@ fingerprinting. Do not fold conditional request headers into identity.
 ## Request and resolve
 
 `ImageBytesRequest` carries `url`, optional `headers`, optional `cacheKey`,
-optional `skipCache`, and optional `onBytesProgress`.
+optional `skipCache`, optional `onBytesProgress`, and optional `cancelToken`.
 
 When `cacheKey` is null, the resolver builds one with `ImageCacheKey.fromUrl`
 (canonical URL + headers). When set, that value is the full durable and HTTP
@@ -66,6 +66,12 @@ the sink. Do not invent mid-download percents from silence. Resolve remains a
 single completed body (`Future<Uint8List>` or rich `ImageBytesResolveResult`);
 there is no public streaming resolve API. The sink does not participate in
 identity or coalesce.
+
+`cancelToken` is this caller's token on `HttpBytesClient.send`. Cancelling it
+fails the resolve with `HttpBytesException$Cancelled` (never stale-served). A
+coalesced GET keeps running for the callers still waiting; cancelling the last
+one aborts the request. A durable fresh hit returns without consulting it. Not
+part of identity or coalesce.
 
 `ImageBytesResolver` order:
 

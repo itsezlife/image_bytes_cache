@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:cancel_token/cancel_token.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_bytes_cache/src/cache/cache_middleware.dart';
 import 'package:image_bytes_cache/src/cache/middlewares/skip_cache_middleware.dart';
@@ -56,6 +57,7 @@ final class ImageBytesRequest {
     this.cacheKey,
     this.skipCache = false,
     this.onBytesProgress,
+    this.cancelToken,
   });
 
   /// Absolute or [Uri.base]-relative URL.
@@ -105,6 +107,16 @@ final class ImageBytesRequest {
   /// [resolveRich]); this is not a streaming resolve API. Does not participate
   /// in [ImageCacheKey] identity or in-flight coalesce.
   final ImageBytesProgressCallback? onBytesProgress;
+
+  /// Cancels this caller's network fetch.
+  ///
+  /// Forwarded to [HttpBytesClient.send] as the per-caller token: cancelling
+  /// fails this resolve with [HttpBytesException$Cancelled] and never serves
+  /// stale bytes. A coalesced GET keeps running while another caller still
+  /// waits on it; cancelling its last caller aborts the request. A durable
+  /// fresh hit returns without consulting the token. Does not participate in
+  /// [ImageCacheKey] identity or in-flight coalesce.
+  final CancelToken? cancelToken;
 }
 
 /// Looks up bytes in a cache, then fetches, then write-through.
@@ -537,6 +549,7 @@ final class ImageBytesResolver implements IImageBytesResolver {
     return client.send(
       HttpBytesRequest(httpRequest),
       context: httpContext,
+      cancelToken: request.cancelToken,
       onBytesProgress: request.onBytesProgress,
     );
   }
