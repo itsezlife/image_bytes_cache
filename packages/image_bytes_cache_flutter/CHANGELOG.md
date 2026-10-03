@@ -1,3 +1,11 @@
+## 0.4.1
+
+- **ADDED**: Before, a raster load kept downloading after every painter went
+  away. Now `CachedNetworkBytesImageProvider` cancels its resolve once its
+  image stream loses its last listener, and the cancellation never reaches
+  `errorListener`. `ImageCache` listens to a pending load itself, so a host
+  that stops painting before the first frame should `evict` the provider.
+
 ## 0.4.0
 
 - **ADDED**: Before, setting both `cacheWidth` and `cacheHeight` always

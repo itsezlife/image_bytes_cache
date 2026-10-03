@@ -627,6 +627,56 @@ void main() {
         expect(image.height, height);
       });
     }
+
+    group('cancellation', () {
+      final listener = ImageStreamListener((_, _) {});
+
+      /// Resolves [provider], listens until its request lands, then stops.
+      Future<CancelToken?> loadThenStopListening(CachedNetworkBytesImageProvider provider) async {
+        final stream = provider.resolve(ImageConfiguration.empty)..addListener(listener);
+        await pumpEventQueue();
+        stream.removeListener(listener);
+        await pumpEventQueue();
+        return resolver.requests.single.cancelToken;
+      }
+
+      test('a pending load stays alive while the image cache holds it', () async {
+        resolver.hold = Completer<void>();
+
+        final token = await loadThenStopListening(
+          CachedNetworkBytesImageProvider('https://cdn.example.com/pending.png', resolver: resolver),
+        );
+
+        expect(token, isNotNull);
+        expect(token!.isCancelled, isFalse);
+      });
+
+      test('evicting a pending load nobody listens to cancels its request', () async {
+        resolver.hold = Completer<void>();
+        final provider = CachedNetworkBytesImageProvider('https://cdn.example.com/evicted.png', resolver: resolver);
+
+        final token = await loadThenStopListening(provider);
+        await provider.evict();
+
+        expect(token?.isCancelled, isTrue);
+      });
+
+      test('the errorListener does not see the cancellation of its load', () async {
+        resolver.hold = Completer<void>();
+        final errors = <Object>[];
+        final provider = CachedNetworkBytesImageProvider(
+          'https://cdn.example.com/quiet.png',
+          resolver: resolver,
+          errorListener: (error, _) => errors.add(error),
+        );
+
+        await loadThenStopListening(provider);
+        await provider.evict();
+        await pumpEventQueue();
+
+        expect(errors, isEmpty);
+      });
+    });
   });
 
   group('ImageDecodeSizePolicy.targetSize', () {
@@ -728,6 +778,10 @@ final class _FakeResolver implements IImageBytesResolver {
   bool emitProgress = true;
   List<(int cumulative, int? total, Future<void> gate)> progressSteps = const [];
 
+  /// Holds every resolve until completed; a cancelled request token fails it
+  /// with [HttpBytesException$Cancelled] instead.
+  Completer<void>? hold;
+
   final requests = <ImageBytesRequest>[];
 
   @override
@@ -739,6 +793,11 @@ final class _FakeResolver implements IImageBytesResolver {
   @override
   Future<ImageBytesResolveResult> resolveRich(ImageBytesRequest request) async {
     requests.add(request);
+    if (hold case final gate?) {
+      final token = request.cancelToken;
+      await Future.any([gate.future, ?token?.whenCancel]);
+      if (token?.isCancelled ?? false) throw const HttpBytesException$Cancelled();
+    }
     if (error case final err?) {
       throw err;
     }

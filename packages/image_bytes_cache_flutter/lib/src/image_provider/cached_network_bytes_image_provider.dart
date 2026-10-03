@@ -123,6 +123,12 @@ enum ImageDecodeSizePolicy {
 /// Resolve, empty-body, and decode failures surface on the [ImageStream].
 /// Optional [errorListener] covers slots without [Image.errorBuilder]
 /// (DecorationImage alone).
+///
+/// A load cancels its resolve ([ImageBytesRequest.cancelToken]) once its
+/// stream loses its last listener; the cancellation never reaches
+/// [errorListener]. [ImageCache] itself listens to a pending load, so a host
+/// that stops listening before the first frame should [evict] the provider to
+/// let the request abort when nobody else waits on it.
 @immutable
 class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesImageProvider> {
   /// Creates a provider for [url].
@@ -254,9 +260,10 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
   ) {
     // Handed to [_loadAsync], which must close on every completion path.
     final chunkEvents = StreamController<ImageChunkEvent>();
+    final cancelToken = CancelToken();
 
     final completer = MultiFrameImageStreamCompleter(
-      codec: _loadAsync(key, chunkEvents, decode: decode),
+      codec: _loadAsync(key, chunkEvents, decode: decode, cancelToken: cancelToken),
       chunkEvents: chunkEvents.stream,
       scale: key.scale,
       debugLabel: key.url,
@@ -264,13 +271,16 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
         DiagnosticsProperty<ImageProvider>('Image provider', this),
         DiagnosticsProperty<CachedNetworkBytesImageProvider>('Image key', key),
       ],
-    );
+    )..addOnLastListenerRemovedCallback(() => cancelToken.cancel('no image stream listeners'));
 
     // Ephemeral: reportError without keep-alive. Do not also call from
     // _loadAsync's catch (double-fire).
     final listener = errorListener;
     if (listener != null) {
-      completer.addEphemeralErrorListener(listener);
+      completer.addEphemeralErrorListener((error, stackTrace) {
+        if (cancelToken.isCancelled) return;
+        listener(error, stackTrace);
+      });
     }
 
     return completer;
@@ -280,6 +290,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
     CachedNetworkBytesImageProvider key,
     StreamController<ImageChunkEvent> chunkEvents, {
     required ImageDecoderCallback decode,
+    required CancelToken cancelToken,
   }) async {
     try {
       assert(
@@ -296,6 +307,7 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
         ImageBytesRequest(
           url: key.url,
           headers: key.headers,
+          cancelToken: cancelToken,
           onBytesProgress: (cumulative, total) {
             chunkEvents.add(
               ImageChunkEvent(
