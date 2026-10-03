@@ -5,6 +5,10 @@
   image stream loses its last listener, and the cancellation never reaches
   `errorListener`. `ImageCache` listens to a pending load itself, so a host
   that stops painting before the first frame should `evict` the provider.
+- **ADDED**: Before, `CachedNetworkBytesImage` left its load running after it
+  was disposed or switched images before the first frame. Now it evicts that
+  unpainted load, so the request aborts unless another image still waits on
+  it.
 
 ## 0.4.0
 

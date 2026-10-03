@@ -459,6 +459,50 @@ void main() {
         );
       });
     });
+
+    group('an unpainted load', () {
+      const urlA = 'https://cdn.example.com/a.png';
+      const urlB = 'https://cdn.example.com/b.png';
+
+      CancelToken? tokenFor(String url) => resolver.requests.lastWhere((r) => r.url == url).cancelToken;
+
+      Future<void> pumpImage(WidgetTester tester, String url) async {
+        await tester.pumpWidget(wrap(CachedNetworkBytesImage(imageUrl: url, resolver: resolver)));
+        await tester.runAsync(pumpEventQueue);
+        await tester.pump();
+      }
+
+      testWidgets('is cancelled when the image is disposed', (tester) async {
+        resolver.resolveGate = Completer<void>().future;
+        await pumpImage(tester, urlA);
+
+        await tester.pumpWidget(const SizedBox());
+        await tester.runAsync(pumpEventQueue);
+
+        expect(tokenFor(urlA)?.isCancelled, isTrue);
+      });
+
+      testWidgets('is cancelled when the image switches to another URL', (tester) async {
+        resolver.resolveGate = Completer<void>().future;
+        await pumpImage(tester, urlA);
+
+        await pumpImage(tester, urlB);
+        await tester.runAsync(pumpEventQueue);
+
+        expect(tokenFor(urlA)?.isCancelled, isTrue);
+      });
+
+      testWidgets('leaves a painted image in the image cache', (tester) async {
+        resolver.bytes = oneByOnePngBytes();
+        await pumpImage(tester, urlA);
+        await settle(tester, () => tester.widget<RawImage>(find.byType(RawImage)).image != null);
+
+        await tester.pumpWidget(const SizedBox());
+        await tester.runAsync(pumpEventQueue);
+
+        expect(PaintingBinding.instance.imageCache.currentSize, 1);
+      });
+    });
   });
 }
 

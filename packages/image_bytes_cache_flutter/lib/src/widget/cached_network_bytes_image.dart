@@ -31,6 +31,9 @@ typedef PlaceholderWidgetBuilder = Widget Function(BuildContext context, String 
 /// fade-out. Progress replaces placeholder when real [ImageChunkEvent]s exist.
 /// State owns a [CachedNetworkBytesLoadSession] shared with the provider and
 /// compose so [ImageFadeSkip.bytesCache] works under [ImageFadePolicy.standard].
+///
+/// Disposing, or switching to another image, before the first frame aborts
+/// that load unless another image still waits on it.
 class CachedNetworkBytesImage extends StatefulWidget {
   /// Creates a thin raster image for [imageUrl].
   ///
@@ -241,6 +244,19 @@ class _CachedNetworkBytesImageState extends State<CachedNetworkBytesImage> {
 
   RasterPaintBuilders? _composed;
 
+  // Watches the stream [Image] paints from, only to learn whether it delivered
+  // a frame or an error before this state lets go of it.
+  late final ImageStreamListener _loadWatcher = ImageStreamListener(
+    (image, _) {
+      image.dispose();
+      _awaitingImage = false;
+    },
+    onError: (_, _) => _awaitingImage = false,
+  );
+  CachedNetworkBytesImageProvider? _watchedProvider;
+  ImageStream? _watchedStream;
+  bool _awaitingImage = false;
+
   @override
   void initState() {
     super.initState();
@@ -248,8 +264,15 @@ class _CachedNetworkBytesImageState extends State<CachedNetworkBytesImage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _watchLoad();
+  }
+
+  @override
   void didUpdateWidget(CachedNetworkBytesImage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _watchLoad();
     if (oldWidget.imageUrl != widget.imageUrl ||
         oldWidget.placeholderBuilder != widget.placeholderBuilder ||
         oldWidget.progressBuilder != widget.progressBuilder ||
@@ -279,6 +302,34 @@ class _CachedNetworkBytesImageState extends State<CachedNetworkBytesImage> {
       fadeOutDuration: widget.fadeOutDuration ?? RasterPaintCompose.defaultFadeOutDuration,
       originOf: () => _loadSession.origin,
     );
+  }
+
+  @override
+  void dispose() {
+    _releaseLoad();
+    super.dispose();
+  }
+
+  void _watchLoad() {
+    final provider = _providerFor(widget);
+    final stream = provider.resolve(createLocalImageConfiguration(context));
+    if (stream.key == _watchedStream?.key) return;
+
+    _releaseLoad();
+    _watchedProvider = provider;
+    _watchedStream = stream;
+    _awaitingImage = true;
+    stream.addListener(_loadWatcher);
+  }
+
+  /// [ImageCache] keeps listening to a load in flight, so an unpainted load is
+  /// evicted: its request aborts once no other image listens to it.
+  void _releaseLoad() {
+    _watchedStream?.removeListener(_loadWatcher);
+    if (_awaitingImage) _watchedProvider?.evict().ignore();
+    _watchedProvider = null;
+    _watchedStream = null;
+    _awaitingImage = false;
   }
 
   CachedNetworkBytesImageProvider _providerFor(CachedNetworkBytesImage w) {
