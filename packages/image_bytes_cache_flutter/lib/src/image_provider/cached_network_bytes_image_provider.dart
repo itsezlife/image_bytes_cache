@@ -125,10 +125,14 @@ enum ImageDecodeSizePolicy {
 /// (DecorationImage alone).
 ///
 /// A load cancels its resolve ([ImageBytesRequest.cancelToken]) once its
-/// stream loses its last listener; the cancellation never reaches
-/// [errorListener]. [ImageCache] itself listens to a pending load, so a host
-/// that stops listening before the first frame should [evict] the provider to
-/// let the request abort when nobody else waits on it.
+/// stream loses its last listener. The resulting [HttpBytesException$Cancelled]
+/// is not a failure: the load never completes, reports nothing to
+/// [errorListener] or [FlutterError.reportError], and leaves its [ImageCache]
+/// key to whichever load holds it next. Any other error still reports, even
+/// after the cancel.
+/// [ImageCache] itself listens to a pending load, so a host that stops
+/// listening before the first frame should [evict] the provider to let the
+/// request abort when nobody else waits on it.
 @immutable
 class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesImageProvider> {
   /// Creates a provider for [url].
@@ -263,7 +267,12 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
     final cancelToken = CancelToken();
 
     final completer = MultiFrameImageStreamCompleter(
-      codec: _loadAsync(key, chunkEvents, decode: decode, cancelToken: cancelToken),
+      // With no listener left, the completer would hand our own cancellation to
+      // FlutterError.reportError; a codec that never completes reports nothing.
+      codec: _loadAsync(key, chunkEvents, decode: decode, cancelToken: cancelToken).catchError(
+        (_) => Completer<ui.Codec>().future,
+        test: (error) => error is HttpBytesException$Cancelled && cancelToken.isCancelled,
+      ),
       chunkEvents: chunkEvents.stream,
       scale: key.scale,
       debugLabel: key.url,
@@ -275,12 +284,8 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
 
     // Ephemeral: reportError without keep-alive. Do not also call from
     // _loadAsync's catch (double-fire).
-    final listener = errorListener;
-    if (listener != null) {
-      completer.addEphemeralErrorListener((error, stackTrace) {
-        if (cancelToken.isCancelled) return;
-        listener(error, stackTrace);
-      });
+    if (errorListener case final listener?) {
+      completer.addEphemeralErrorListener(listener);
     }
 
     return completer;
@@ -349,10 +354,14 @@ class CachedNetworkBytesImageProvider extends ImageProvider<CachedNetworkBytesIm
         ),
       );
     } catch (error) {
-      // Next microtask: sync evict can miss a still-pending ImageCache entry.
-      scheduleMicrotask(() {
-        PaintingBinding.instance.imageCache.evict(key);
-      });
+      // Cancellation fires only after ImageCache dropped this load, so the key
+      // may already hold a newer load that an evict would kill.
+      if (!cancelToken.isCancelled) {
+        // Next microtask: sync evict can miss a still-pending ImageCache entry.
+        scheduleMicrotask(() {
+          PaintingBinding.instance.imageCache.evict(key);
+        });
+      }
       rethrow;
     } finally {
       // Fire-and-forget: awaiting can race the codec Future and drop the

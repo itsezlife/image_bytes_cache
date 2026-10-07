@@ -676,6 +676,53 @@ void main() {
 
         expect(errors, isEmpty);
       });
+
+      List<FlutterErrorDetails> captureFlutterErrors() {
+        final reported = <FlutterErrorDetails>[];
+        final previousOnError = FlutterError.onError;
+        FlutterError.onError = reported.add;
+        addTearDown(() => FlutterError.onError = previousOnError);
+        return reported;
+      }
+
+      test('a cancelled load reports no FlutterError', () async {
+        final reported = captureFlutterErrors();
+        resolver.hold = Completer<void>();
+        final provider = CachedNetworkBytesImageProvider('https://cdn.example.com/dropped.png', resolver: resolver);
+
+        await loadThenStopListening(provider);
+        await provider.evict();
+        await pumpEventQueue();
+
+        expect(reported, isEmpty);
+      });
+
+      test('a failure other than the cancellation still reports after cancel', () async {
+        final reported = captureFlutterErrors();
+        resolver
+          ..hold = Completer<void>()
+          ..error = Exception('store read failed');
+        final provider = CachedNetworkBytesImageProvider('https://cdn.example.com/broken.png', resolver: resolver);
+
+        await loadThenStopListening(provider);
+        await provider.evict();
+        await pumpEventQueue();
+
+        expect(reported.map((details) => details.exception), [resolver.error]);
+      });
+
+      test('a cancelled load leaves a newer load of the same key in the image cache', () async {
+        resolver.hold = Completer<void>();
+        final imageCache = PaintingBinding.instance.imageCache;
+        final provider = CachedNetworkBytesImageProvider('https://cdn.example.com/reloaded.png', resolver: resolver);
+
+        await loadThenStopListening(provider);
+        imageCache.evict(provider);
+        provider.resolve(ImageConfiguration.empty).addListener(listener);
+        await pumpEventQueue();
+
+        expect(imageCache.statusForKey(provider).pending, isTrue);
+      });
     });
   });
 
@@ -779,7 +826,7 @@ final class _FakeResolver implements IImageBytesResolver {
   List<(int cumulative, int? total, Future<void> gate)> progressSteps = const [];
 
   /// Holds every resolve until completed; a cancelled request token fails it
-  /// with [HttpBytesException$Cancelled] instead.
+  /// with [error] when set, else with [HttpBytesException$Cancelled].
   Completer<void>? hold;
 
   final requests = <ImageBytesRequest>[];
@@ -796,7 +843,7 @@ final class _FakeResolver implements IImageBytesResolver {
     if (hold case final gate?) {
       final token = request.cancelToken;
       await Future.any([gate.future, ?token?.whenCancel]);
-      if (token?.isCancelled ?? false) throw const HttpBytesException$Cancelled();
+      if (token?.isCancelled ?? false) throw error ?? const HttpBytesException$Cancelled();
     }
     if (error case final err?) {
       throw err;

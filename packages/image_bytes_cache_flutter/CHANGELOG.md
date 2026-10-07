@@ -1,3 +1,15 @@
+## 0.4.2
+
+- **FIXED**: Before, a raster load cancelled because its last listener went
+  away still reported `HttpBytesException$Cancelled` as a silent
+  `FlutterError`. A widget test that unmounted a pending
+  `CachedNetworkBytesImage` failed with "Request was cancelled", and a custom
+  `FlutterError.onError` that forwards silent errors saw one per cancelled
+  load. Now the cancellation reports nothing, and a listener that attaches to
+  the cancelled stream afterwards gets neither an image nor an error. Other
+  failures still report. A cancelled load also no longer evicts a newer load
+  of the same image from `ImageCache`.
+
 ## 0.4.1
 
 - **ADDED**: Before, a raster load kept downloading after every painter went

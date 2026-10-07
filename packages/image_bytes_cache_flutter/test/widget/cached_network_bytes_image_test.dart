@@ -472,24 +472,28 @@ void main() {
         await tester.pump();
       }
 
-      testWidgets('is cancelled when the image is disposed', (tester) async {
+      testWidgets('is cancelled without an error when the image is disposed', (tester) async {
         resolver.resolveGate = Completer<void>().future;
         await pumpImage(tester, urlA);
 
         await tester.pumpWidget(const SizedBox());
         await tester.runAsync(pumpEventQueue);
+        await tester.pump();
 
         expect(tokenFor(urlA)?.isCancelled, isTrue);
+        expect(tester.takeException(), isNull);
       });
 
-      testWidgets('is cancelled when the image switches to another URL', (tester) async {
+      testWidgets('is cancelled without an error when the image switches to another URL', (tester) async {
         resolver.resolveGate = Completer<void>().future;
         await pumpImage(tester, urlA);
 
         await pumpImage(tester, urlB);
         await tester.runAsync(pumpEventQueue);
+        await tester.pump();
 
         expect(tokenFor(urlA)?.isCancelled, isTrue);
+        expect(tester.takeException(), isNull);
       });
 
       testWidgets('leaves a painted image in the image cache', (tester) async {
@@ -528,6 +532,9 @@ final class _FakeResolver implements IImageBytesResolver {
   Uint8List? bytes;
   Exception? error;
   bool emitProgress = true;
+
+  /// Holds every resolve until it completes; a cancelled request token fails
+  /// it with [HttpBytesException$Cancelled] instead.
   Future<void>? resolveGate;
   List<(int cumulative, int? total, Future<void> gate)> progressSteps = const [];
   ImageBytesOrigin origin = ImageBytesOrigin.network;
@@ -547,7 +554,9 @@ final class _FakeResolver implements IImageBytesResolver {
       throw err;
     }
     if (resolveGate case final gate?) {
-      await gate;
+      final token = request.cancelToken;
+      await Future.any([gate, ?token?.whenCancel]);
+      if (token?.isCancelled ?? false) throw const HttpBytesException$Cancelled();
     }
     if (emitProgress) {
       final sink = request.onBytesProgress;
